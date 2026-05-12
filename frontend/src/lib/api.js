@@ -41,3 +41,9 @@ export const chatsAPI = {
   create: (characterId) => api.post('/chats', { characterId }),
   sendMessage: (chatId, message) => api.post(`/chats/${chatId}/message`, { message }),
 };
+
+export const subscriptionAPI = {
+  plans: () => api.get('/subscription/plans'),
+  stats: () => api.get('/me/stats'),
+  checkout: (plan) => api.post('/subscription/checkout', { plan }),
+};

@@ -37,11 +37,14 @@ EMERGENT_LLM_KEY = os.environ.get('EMERGENT_LLM_KEY', '')
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 OWNER_EMAIL = "generalpaz1050@hotmail.com"
 
+# Plans & limits. All plans have unlimited characters by design.
 PLAN_LIMITS = {
-    "free":   {"messages_per_day": 20,   "max_characters": 3},
-    "silver": {"messages_per_day": 200,  "max_characters": 20},
-    "pro":    {"messages_per_day": 10**9, "max_characters": 10**9},
+    "silver":  {"messages_per_day": 40,    "max_characters": 10**9, "price_usd": 0.0,  "label": "Silver"},
+    "gold":    {"messages_per_day": 200,   "max_characters": 10**9, "price_usd": 4.99, "label": "Gold"},
+    "diamond": {"messages_per_day": 10**9, "max_characters": 10**9, "price_usd": 9.99, "label": "Diamond"},
 }
+
+DEFAULT_PLAN = "silver"
 
 
 def is_owner(user: Dict[str, Any]) -> bool:
@@ -49,21 +52,17 @@ def is_owner(user: Dict[str, Any]) -> bool:
 
 
 def get_user_plan(user: Dict[str, Any]) -> str:
-    """Return the active plan key for this user: 'free' | 'silver' | 'pro'."""
+    """Return the active plan key for this user. Owner -> 'diamond'. Default -> 'silver'."""
     if is_owner(user):
-        return "pro"
+        return "diamond"
     sub = user.get("subscription") or {}
     plan = sub.get("plan")
     status = sub.get("status")
-    if plan in ("silver", "pro") and status == "active":
-        # Check expiry
+    if plan in ("gold", "diamond") and status == "active":
         end = sub.get("currentPeriodEnd")
         if end:
             try:
-                if isinstance(end, str):
-                    end_dt = datetime.fromisoformat(end)
-                else:
-                    end_dt = end
+                end_dt = datetime.fromisoformat(end) if isinstance(end, str) else end
                 if end_dt.tzinfo is None:
                     end_dt = end_dt.replace(tzinfo=timezone.utc)
                 if end_dt > datetime.now(timezone.utc):
@@ -72,11 +71,11 @@ def get_user_plan(user: Dict[str, Any]) -> str:
                 pass
         else:
             return plan
-    return "free"
+    return DEFAULT_PLAN
 
 
 async def check_and_increment_message_quota(user: Dict[str, Any]) -> None:
-    """Raise 403 if user has exceeded their daily message quota. Owner bypasses."""
+    """Raise 429 if user exceeded daily message quota. Owner bypasses."""
     if is_owner(user):
         return
     plan = get_user_plan(user)
@@ -89,7 +88,7 @@ async def check_and_increment_message_quota(user: Dict[str, Any]) -> None:
     if used_today >= limit:
         raise HTTPException(
             status_code=429,
-            detail=f"Daily message limit reached for your {plan} plan ({limit}/day). Upgrade to continue."
+            detail=f"Has alcanzado el límite diario de tu plan {PLAN_LIMITS[plan]['label']} ({limit}/día). Mejora tu plan para seguir."
         )
 
     await db.users.update_one(
@@ -99,17 +98,8 @@ async def check_and_increment_message_quota(user: Dict[str, Any]) -> None:
 
 
 async def check_character_quota(user: Dict[str, Any]) -> None:
-    """Raise 403 if user has reached their max characters. Owner bypasses."""
-    if is_owner(user):
-        return
-    plan = get_user_plan(user)
-    max_chars = PLAN_LIMITS[plan]["max_characters"]
-    count = await db.characters.count_documents({"user_id": user["user_id"]})
-    if count >= max_chars:
-        raise HTTPException(
-            status_code=403,
-            detail=f"Character limit reached for your {plan} plan ({max_chars}). Upgrade to create more."
-        )
+    """All plans have unlimited characters — kept as no-op for future use."""
+    return None
 
 # Create FastAPI app
 app = FastAPI(title="Ethernal API")
@@ -479,6 +469,140 @@ async def logout(
         await db.user_sessions.delete_one({"session_token": token})
     response.delete_cookie("session_token", path="/")
     return {"success": True}
+
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# Subscription / Stats Routes
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+@api_router.get("/subscription/plans")
+async def list_plans():
+    """Public catalog of plans for the pricing UI."""
+    plans = [
+        {
+            "key": "silver",
+            "label": "Silver",
+            "price_usd": 0.0,
+            "price_label": "Gratis",
+            "messages_per_day": PLAN_LIMITS["silver"]["messages_per_day"],
+            "is_default": True,
+            "features": [
+                "40 mensajes al día",
+                "Personajes ilimitados",
+                "Acceso a todos los temas visuales",
+                "Galería pública",
+            ],
+        },
+        {
+            "key": "gold",
+            "label": "Gold",
+            "price_usd": 4.99,
+            "price_label": "$4.99 / mes",
+            "messages_per_day": PLAN_LIMITS["gold"]["messages_per_day"],
+            "is_default": False,
+            "features": [
+                "200 mensajes al día",
+                "Personajes ilimitados",
+                "Respuestas prioritarias",
+                "Insignia Gold en tu perfil",
+            ],
+        },
+        {
+            "key": "diamond",
+            "label": "Diamond",
+            "price_usd": 9.99,
+            "price_label": "$9.99 / mes",
+            "messages_per_day": "∞",
+            "is_default": False,
+            "features": [
+                "Mensajes ILIMITADOS",
+                "Personajes ilimitados",
+                "Máxima prioridad de respuesta",
+                "Insignia Diamond exclusiva",
+                "Soporte VIP",
+            ],
+        },
+    ]
+    return {"plans": plans}
+
+
+@api_router.get("/me/stats")
+async def my_stats(
+    authorization: Optional[str] = Header(None),
+    session_token: Optional[str] = Cookie(None),
+):
+    user = await require_user(authorization, session_token)
+    today = datetime.now(timezone.utc).date().isoformat()
+    usage = user.get("usage") or {}
+    used_today = usage.get("messages_today", 0) if usage.get("date") == today else 0
+
+    plan_key = get_user_plan(user)
+    plan_info = PLAN_LIMITS[plan_key]
+    daily_limit = plan_info["messages_per_day"]
+    is_unlimited = daily_limit >= 10**8
+
+    char_count = await db.characters.count_documents({"user_id": user["user_id"]})
+    chat_count = await db.chats.count_documents({"user_id": user["user_id"]})
+
+    # Aggregate total messages across all chats
+    pipeline = [
+        {"$match": {"user_id": user["user_id"]}},
+        {"$project": {"n": {"$size": {"$ifNull": ["$messages", []]}}}},
+        {"$group": {"_id": None, "total": {"$sum": "$n"}}},
+    ]
+    total_msgs = 0
+    async for row in db.chats.aggregate(pipeline):
+        total_msgs = row.get("total", 0)
+
+    sub = user.get("subscription") or {}
+    end = sub.get("currentPeriodEnd")
+    end_iso = end.isoformat() if isinstance(end, datetime) else end
+
+    return {
+        "plan": plan_key,
+        "plan_label": plan_info["label"],
+        "is_owner": is_owner(user),
+        "messages_today": used_today,
+        "messages_limit": "∞" if is_unlimited else daily_limit,
+        "is_unlimited": is_unlimited,
+        "characters_count": char_count,
+        "chats_count": chat_count,
+        "total_messages_sent": total_msgs,
+        "subscription_end": end_iso,
+        "subscription_status": sub.get("status"),
+    }
+
+
+class CheckoutRequest(BaseModel):
+    plan: str   # "gold" | "diamond"
+
+
+@api_router.post("/subscription/checkout")
+async def subscription_checkout(
+    req: CheckoutRequest,
+    authorization: Optional[str] = Header(None),
+    session_token: Optional[str] = Cookie(None),
+):
+    """Placeholder for real payment integration (Stripe / PayPal).
+    Currently returns a 'coming soon' response. Owner can self-upgrade for testing.
+    """
+    user = await require_user(authorization, session_token)
+    if req.plan not in ("gold", "diamond"):
+        raise HTTPException(400, "Invalid plan")
+
+    # Owner can self-grant for testing the UI flow
+    if is_owner(user):
+        end = datetime.now(timezone.utc) + timedelta(days=30)
+        sub = {"plan": req.plan, "status": "active", "currentPeriodEnd": end}
+        await db.users.update_one({"user_id": user["user_id"]}, {"$set": {"subscription": sub}})
+        return {"success": True, "owner_granted": True, "plan": req.plan}
+
+    return {
+        "success": False,
+        "checkout_pending": True,
+        "message": "Los pagos con tarjeta estarán disponibles pronto. Contacta al administrador para activar tu plan.",
+        "plan": req.plan,
+    }
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -1053,10 +1177,10 @@ async def admin_set_subscription(
     if not target:
         raise HTTPException(404, "User not found")
 
-    if req.plan in (None, "", "free"):
+    if req.plan in (None, "", "silver", "free"):
         sub = {"plan": None, "status": None, "currentPeriodEnd": None}
     else:
-        if req.plan not in ("silver", "pro"):
+        if req.plan not in ("gold", "diamond"):
             raise HTTPException(400, "Invalid plan")
         end = datetime.now(timezone.utc) + timedelta(days=req.days or 30)
         sub = {"plan": req.plan, "status": req.status or "active", "currentPeriodEnd": end}

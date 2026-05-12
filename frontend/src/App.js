@@ -9,6 +9,7 @@ import Dashboard from './components/Dashboard';
 import ChatView from './components/ChatView';
 import ExploreView from './components/ExploreView';
 import ProfileView from './components/ProfileView';
+import SubscriptionView from './components/SubscriptionView';
 import AuthCallback from './components/AuthCallback';
 import { Flame } from 'lucide-react';
 import { Toaster } from './components/ui/sonner';
@@ -274,6 +275,16 @@ function MainApp() {
         user={user}
         currentTheme={currentTheme}
         onUpdateProfile={updateProfile}
+        onBack={() => setCurrentView('dashboard')}
+      />
+    );
+  }
+
+  if (currentView === 'subscription') {
+    return (
+      <SubscriptionView
+        t={t}
+        user={user}
         onBack={() => setCurrentView('dashboard')}
       />
     );

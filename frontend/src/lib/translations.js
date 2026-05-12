@@ -40,6 +40,7 @@ export const translations = {
       messages: 'mensajes',
       settings: 'Configuración',
       editProfile: 'Editar Perfil',
+      subscription: 'Mi Plan',
     },
     character: {
       createNew: 'Crear Nuevo Personaje',
@@ -194,6 +195,7 @@ export const translations = {
       messages: 'messages',
       settings: 'Settings',
       editProfile: 'Edit Profile',
+      subscription: 'My Plan',
     },
     character: {
       createNew: 'Create New Character',

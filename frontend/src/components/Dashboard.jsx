@@ -10,7 +10,7 @@ import { Badge } from './ui/badge';
 import { Label } from './ui/label';
 import { Checkbox } from './ui/checkbox';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select';
-import { Flame, Plus, MessageCircle, LogOut, Settings, Search, Bot, Upload, Wand2, Sparkles, Trash2, Heart } from 'lucide-react';
+import { Flame, Plus, MessageCircle, LogOut, Settings, Search, Bot, Upload, Wand2, Sparkles, Trash2, Heart, Crown } from 'lucide-react';
 import { charactersAPI } from '../lib/api';
 
 export default function Dashboard({ t, user, characters, chats, onLogout, onViewChange, onCreateCharacter, onDeleteCharacter, onStartChat, onLoadCharacters, onLoadChats }) {
@@ -101,6 +101,10 @@ export default function Dashboard({ t, user, characters, chats, onLogout, onView
             <Button variant="ghost" onClick={() => onViewChange('explore')} className="px-2 sm:px-3" style={{ color: 'var(--foreground)' }}>
               <Search className="w-4 h-4 sm:mr-2" />
               <span className="hidden sm:inline">{t.dashboard.explore}</span>
+            </Button>
+            <Button variant="ghost" onClick={() => onViewChange('subscription')} className="px-2 sm:px-3" style={{ color: 'var(--foreground)' }}>
+              <Crown className="w-4 h-4 sm:mr-2" />
+              <span className="hidden sm:inline">{t.dashboard.subscription || 'Mi Plan'}</span>
             </Button>
             <Button variant="ghost" onClick={() => onViewChange('profile')} className="px-2 sm:px-3" style={{ color: 'var(--foreground)' }}>
               <Settings className="w-4 h-4 sm:mr-2" />

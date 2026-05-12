@@ -163,12 +163,38 @@ function MainApp() {
 
   const sendMessage = async (message) => {
     if (!currentChat) return null;
-    const res = await chatsAPI.sendMessage(currentChat._id || currentChat.id, message);
+
+    // Optimistic UI: show user's message immediately while AI thinks
+    const optimisticUserMsg = {
+      role: 'user',
+      content: message,
+      timestamp: new Date().toISOString(),
+      _optimistic: true,
+    };
     setCurrentChat((prev) => ({
       ...prev,
-      messages: [...(prev.messages || []), res.data.userMessage, res.data.assistantMessage],
+      messages: [...(prev.messages || []), optimisticUserMsg],
     }));
-    return res.data;
+
+    try {
+      const res = await chatsAPI.sendMessage(currentChat._id || currentChat.id, message);
+      // Replace optimistic message with server-confirmed messages
+      setCurrentChat((prev) => {
+        const withoutOptimistic = (prev.messages || []).filter((m) => !m._optimistic);
+        return {
+          ...prev,
+          messages: [...withoutOptimistic, res.data.userMessage, res.data.assistantMessage],
+        };
+      });
+      return res.data;
+    } catch (e) {
+      // Remove optimistic message on error
+      setCurrentChat((prev) => ({
+        ...prev,
+        messages: (prev.messages || []).filter((m) => !m._optimistic),
+      }));
+      throw e;
+    }
   };
 
   const generateScene = async (prompt) => {

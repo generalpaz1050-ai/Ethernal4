@@ -16,6 +16,9 @@ export default function ProfileView({ t, user, currentTheme, onUpdateProfile, on
     avatar: user?.avatar || '',
     theme: user?.theme || currentTheme,
     language: user?.language || 'es',
+    gender: user?.gender || '',
+    age: user?.age || '',
+    pronouns: user?.pronouns || '',
   });
   const [avatarPreview, setAvatarPreview] = useState(user?.avatar || null);
   const [saving, setSaving] = useState(false);
@@ -84,6 +87,30 @@ export default function ProfileView({ t, user, currentTheme, onUpdateProfile, on
               <div>
                 <Label style={{ color: 'var(--foreground)' }}>{t.profile.bio}</Label>
                 <Textarea value={formData.bio} onChange={(e) => setFormData({ ...formData, bio: e.target.value })} placeholder={t.profile.bioPlaceholder} rows={4} className="input-themed mt-1.5" />
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <Label style={{ color: 'var(--foreground)' }}>{t.profile.genderLabel}</Label>
+                  <Select value={formData.gender || ''} onValueChange={(val) => setFormData({ ...formData, gender: val })}>
+                    <SelectTrigger className="input-themed h-12 mt-1.5"><SelectValue placeholder="—" /></SelectTrigger>
+                    <SelectContent className="glass-strong border-themed">
+                      <SelectItem value="male">{t.profile.genderMale}</SelectItem>
+                      <SelectItem value="female">{t.profile.genderFemale}</SelectItem>
+                      <SelectItem value="non-binary">{t.profile.genderNonBinary}</SelectItem>
+                      <SelectItem value="prefer_not_say">{t.profile.genderPreferNotSay}</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div>
+                  <Label style={{ color: 'var(--foreground)' }}>{t.profile.ageLabel}</Label>
+                  <Input value={formData.age} onChange={(e) => setFormData({ ...formData, age: e.target.value })} placeholder={t.profile.agePlaceholder} className="input-themed mt-1.5 h-12" />
+                </div>
+              </div>
+
+              <div>
+                <Label style={{ color: 'var(--foreground)' }}>{t.profile.pronounsLabel}</Label>
+                <Input value={formData.pronouns} onChange={(e) => setFormData({ ...formData, pronouns: e.target.value })} placeholder={t.profile.pronounsPlaceholder} className="input-themed mt-1.5" />
               </div>
 
               <div>

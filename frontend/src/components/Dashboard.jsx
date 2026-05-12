@@ -23,6 +23,8 @@ export default function Dashboard({ t, user, characters, chats, onLogout, onView
   const [newChar, setNewChar] = useState({
     name: '', avatar: '', description: '', personality: '',
     backstory: '', scenario: '', universe: '', isPublic: false,
+    gender: '', age: '', appearance: '', voice: '',
+    likes: '', dislikes: '', tags: '', greeting: '', exampleDialogue: '',
   });
   const [imagePreview, setImagePreview] = useState(null);
   const fileInputRef = useRef(null);
@@ -57,7 +59,12 @@ export default function Dashboard({ t, user, characters, chats, onLogout, onView
     const ok = await onCreateCharacter(newChar);
     if (ok) {
       setShowCreate(false);
-      setNewChar({ name: '', avatar: '', description: '', personality: '', backstory: '', scenario: '', universe: '', isPublic: false });
+      setNewChar({
+        name: '', avatar: '', description: '', personality: '',
+        backstory: '', scenario: '', universe: '', isPublic: false,
+        gender: '', age: '', appearance: '', voice: '',
+        likes: '', dislikes: '', tags: '', greeting: '', exampleDialogue: '',
+      });
       setImagePreview(null);
     }
   };
@@ -158,13 +165,49 @@ export default function Dashboard({ t, user, characters, chats, onLogout, onView
                       <Label style={{ color: 'var(--foreground)' }}>{t.character.nameLabel} *</Label>
                       <Input value={newChar.name} onChange={(e) => setNewChar({ ...newChar, name: e.target.value })} placeholder={t.character.namePlaceholder} required className="input-themed mt-1.5" />
                     </div>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      <div>
+                        <Label style={{ color: 'var(--foreground)' }}>{t.character.genderLabel}</Label>
+                        <Select value={newChar.gender || ''} onValueChange={(val) => setNewChar({ ...newChar, gender: val })}>
+                          <SelectTrigger className="input-themed mt-1.5"><SelectValue placeholder="—" /></SelectTrigger>
+                          <SelectContent className="glass-strong border-themed">
+                            <SelectItem value="male">{t.character.genderMale}</SelectItem>
+                            <SelectItem value="female">{t.character.genderFemale}</SelectItem>
+                            <SelectItem value="non-binary">{t.character.genderNonBinary}</SelectItem>
+                            <SelectItem value="other">{t.character.genderOther}</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      <div>
+                        <Label style={{ color: 'var(--foreground)' }}>{t.character.ageLabel}</Label>
+                        <Input value={newChar.age} onChange={(e) => setNewChar({ ...newChar, age: e.target.value })} placeholder={t.character.agePlaceholder} className="input-themed mt-1.5" />
+                      </div>
+                    </div>
                     <div>
                       <Label style={{ color: 'var(--foreground)' }}>{t.character.descriptionLabel} *</Label>
                       <Textarea value={newChar.description} onChange={(e) => setNewChar({ ...newChar, description: e.target.value })} placeholder={t.character.descriptionPlaceholder} required rows={3} className="input-themed mt-1.5" />
                     </div>
                     <div>
+                      <Label style={{ color: 'var(--foreground)' }}>{t.character.appearanceLabel}</Label>
+                      <Textarea value={newChar.appearance} onChange={(e) => setNewChar({ ...newChar, appearance: e.target.value })} placeholder={t.character.appearancePlaceholder} rows={3} className="input-themed mt-1.5" />
+                    </div>
+                    <div>
                       <Label style={{ color: 'var(--foreground)' }}>{t.character.personalityLabel}</Label>
                       <Textarea value={newChar.personality} onChange={(e) => setNewChar({ ...newChar, personality: e.target.value })} placeholder={t.character.personalityPlaceholder} rows={3} className="input-themed mt-1.5" />
+                    </div>
+                    <div>
+                      <Label style={{ color: 'var(--foreground)' }}>{t.character.voiceLabel}</Label>
+                      <Textarea value={newChar.voice} onChange={(e) => setNewChar({ ...newChar, voice: e.target.value })} placeholder={t.character.voicePlaceholder} rows={2} className="input-themed mt-1.5" />
+                    </div>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      <div>
+                        <Label style={{ color: 'var(--foreground)' }}>{t.character.likesLabel}</Label>
+                        <Textarea value={newChar.likes} onChange={(e) => setNewChar({ ...newChar, likes: e.target.value })} placeholder={t.character.likesPlaceholder} rows={2} className="input-themed mt-1.5" />
+                      </div>
+                      <div>
+                        <Label style={{ color: 'var(--foreground)' }}>{t.character.dislikesLabel}</Label>
+                        <Textarea value={newChar.dislikes} onChange={(e) => setNewChar({ ...newChar, dislikes: e.target.value })} placeholder={t.character.dislikesPlaceholder} rows={2} className="input-themed mt-1.5" />
+                      </div>
                     </div>
                     <div>
                       <Label style={{ color: 'var(--foreground)' }}>{t.character.backstoryLabel}</Label>
@@ -175,9 +218,21 @@ export default function Dashboard({ t, user, characters, chats, onLogout, onView
                       <Textarea value={newChar.scenario} onChange={(e) => setNewChar({ ...newChar, scenario: e.target.value })} placeholder={t.character.scenarioPlaceholder} rows={3} className="input-themed mt-1.5" />
                     </div>
                     <div>
+                      <Label style={{ color: 'var(--foreground)' }}>{t.character.greetingLabel}</Label>
+                      <Textarea value={newChar.greeting} onChange={(e) => setNewChar({ ...newChar, greeting: e.target.value })} placeholder={t.character.greetingPlaceholder} rows={2} className="input-themed mt-1.5" />
+                    </div>
+                    <div>
+                      <Label style={{ color: 'var(--foreground)' }}>{t.character.exampleDialogueLabel}</Label>
+                      <Textarea value={newChar.exampleDialogue} onChange={(e) => setNewChar({ ...newChar, exampleDialogue: e.target.value })} placeholder={t.character.exampleDialoguePlaceholder} rows={3} className="input-themed mt-1.5" />
+                    </div>
+                    <div>
                       <Label style={{ color: 'var(--foreground)' }}>{t.character.universeLabel}</Label>
                       <Textarea value={newChar.universe} onChange={(e) => setNewChar({ ...newChar, universe: e.target.value })} placeholder={t.character.universePlaceholder} rows={2} className="input-themed mt-1.5" />
                       <p className="text-xs mt-1" style={{ color: 'var(--muted-foreground)' }}>{t.character.universeHint}</p>
+                    </div>
+                    <div>
+                      <Label style={{ color: 'var(--foreground)' }}>{t.character.tagsLabel}</Label>
+                      <Input value={newChar.tags} onChange={(e) => setNewChar({ ...newChar, tags: e.target.value })} placeholder={t.character.tagsPlaceholder} className="input-themed mt-1.5" />
                     </div>
                     <div className="flex items-center gap-2">
                       <Checkbox id="isPublic" checked={newChar.isPublic} onCheckedChange={(v) => setNewChar({ ...newChar, isPublic: !!v })} />

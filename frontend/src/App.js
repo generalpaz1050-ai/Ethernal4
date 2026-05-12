@@ -197,16 +197,6 @@ function MainApp() {
     }
   };
 
-  const generateScene = async (prompt) => {
-    if (!currentChat) return null;
-    const res = await chatsAPI.generateImage(prompt || 'Escena actual del roleplay', currentChat._id || currentChat.id);
-    setCurrentChat((prev) => ({
-      ...prev,
-      messages: [...(prev.messages || []), res.data.message],
-    }));
-    return res.data;
-  };
-
   const updateProfile = async (data) => {
     try {
       const res = await authAPI.updateProfile(data);
@@ -259,7 +249,6 @@ function MainApp() {
         chat={currentChat}
         character={currentCharacter}
         onSendMessage={sendMessage}
-        onGenerateScene={generateScene}
         onBack={() => {
           setCurrentView('dashboard');
           loadChats();

@@ -40,5 +40,4 @@ export const chatsAPI = {
   list: () => api.get('/chats'),
   create: (characterId) => api.post('/chats', { characterId }),
   sendMessage: (chatId, message) => api.post(`/chats/${chatId}/message`, { message }),
-  generateImage: (prompt, chatId) => api.post('/generate-image', { prompt, chatId }),
 };

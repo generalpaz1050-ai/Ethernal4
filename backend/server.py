@@ -62,6 +62,9 @@ class UpdateProfileRequest(BaseModel):
     bio: Optional[str] = None
     theme: Optional[str] = None
     language: Optional[str] = None
+    gender: Optional[str] = None
+    age: Optional[str] = None
+    pronouns: Optional[str] = None
 
 
 class CharacterCreate(BaseModel):
@@ -73,6 +76,16 @@ class CharacterCreate(BaseModel):
     scenario: Optional[str] = ""
     universe: Optional[str] = ""
     isPublic: Optional[bool] = False
+    # New rich fields
+    gender: Optional[str] = ""          # male | female | non-binary | other
+    age: Optional[str] = ""             # free text e.g. "25", "ancient", "unknown"
+    appearance: Optional[str] = ""      # physical description (height, body, hair, eyes, clothing)
+    voice: Optional[str] = ""           # speech style, accent, tone
+    likes: Optional[str] = ""           # hobbies, things they enjoy
+    dislikes: Optional[str] = ""        # pet peeves, fears
+    tags: Optional[str] = ""            # comma separated for search
+    greeting: Optional[str] = ""        # first message the character sends
+    exampleDialogue: Optional[str] = "" # canonical example showing their voice
 
 
 class ChatCreate(BaseModel):
@@ -81,11 +94,6 @@ class ChatCreate(BaseModel):
 
 class MessageRequest(BaseModel):
     message: str
-
-
-class ImageGenRequest(BaseModel):
-    prompt: str
-    chatId: Optional[str] = None
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -176,6 +184,9 @@ def serialize_user(user: Dict[str, Any]) -> Dict[str, Any]:
         "bio": user.get("bio", ""),
         "theme": user.get("theme", "medievalWarm"),
         "language": user.get("language", "es"),
+        "gender": user.get("gender", ""),
+        "age": user.get("age", ""),
+        "pronouns": user.get("pronouns", ""),
     }
 
 
@@ -364,6 +375,16 @@ def serialize_character(char: Dict[str, Any]) -> Dict[str, Any]:
         "isPublic": char.get("is_public", False),
         "likes": char.get("likes", 0),
         "createdAt": char.get("created_at").isoformat() if char.get("created_at") else None,
+        # New rich fields
+        "gender": char.get("gender", ""),
+        "age": char.get("age", ""),
+        "appearance": char.get("appearance", ""),
+        "voice": char.get("voice", ""),
+        "likesText": char.get("likes_text", ""),
+        "dislikes": char.get("dislikes", ""),
+        "tags": char.get("tags", ""),
+        "greeting": char.get("greeting", ""),
+        "exampleDialogue": char.get("example_dialogue", ""),
     }
 
 
@@ -410,6 +431,15 @@ async def create_character(req: CharacterCreate, authorization: Optional[str] = 
         "is_public": req.isPublic or False,
         "likes": 0,
         "created_at": datetime.now(timezone.utc),
+        "gender": req.gender or "",
+        "age": req.age or "",
+        "appearance": req.appearance or "",
+        "voice": req.voice or "",
+        "likes_text": req.likes or "",
+        "dislikes": req.dislikes or "",
+        "tags": req.tags or "",
+        "greeting": req.greeting or "",
+        "example_dialogue": req.exampleDialogue or "",
     }
     await db.characters.insert_one(char)
     return {"character": serialize_character(char)}
@@ -428,9 +458,13 @@ async def update_character(
         raise HTTPException(404, "Character not found")
     
     update_data = req.dict()
-    # Map isPublic -> is_public
+    # Map camelCase -> snake_case for DB
     if "isPublic" in update_data:
         update_data["is_public"] = update_data.pop("isPublic")
+    if "exampleDialogue" in update_data:
+        update_data["example_dialogue"] = update_data.pop("exampleDialogue")
+    if "likes" in update_data:
+        update_data["likes_text"] = update_data.pop("likes")
     update_data["updated_at"] = datetime.now(timezone.utc)
     
     await db.characters.update_one({"character_id": character_id}, {"$set": update_data})
@@ -547,6 +581,8 @@ def build_ultra_immersive_system_prompt(
     user_lang: str = "es",
     history: Optional[List[Dict[str, Any]]] = None,
     user_name: str = "",
+    user_gender: str = "",
+    user_pronouns: str = "",
 ) -> str:
     """Build immersive adult roleplay system prompt for Claude Sonnet 4.5.
 
@@ -560,6 +596,17 @@ def build_ultra_immersive_system_prompt(
     backstory = character.get("backstory", "")
     scenario = character.get("scenario", "")
     universe = character.get("universe", "")
+    gender = character.get("gender", "")
+    age = character.get("age", "")
+    appearance = character.get("appearance", "")
+    voice = character.get("voice", "")
+    likes_text = character.get("likes_text", "")
+    dislikes = character.get("dislikes", "")
+    greeting = character.get("greeting", "")
+    example_dialogue = character.get("example_dialogue", "")
+
+    def line(label: str, value: str) -> str:
+        return f"{label}: {value}\n" if value else ""
 
     history_block = _format_history_block(history or [], max_turns=20, char_name=name)
     memory_section_es = (
@@ -571,19 +618,42 @@ def build_ultra_immersive_system_prompt(
         if history_block else ""
     )
 
+    user_block_es = ""
+    if user_name or user_gender or user_pronouns:
+        user_block_es = "\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\nUSUARIO CON EL QUE HACES ROLEPLAY\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+        user_block_es += line("Nombre", user_name)
+        user_block_es += line("Género", user_gender)
+        user_block_es += line("Pronombres", user_pronouns)
+
+    user_block_en = ""
+    if user_name or user_gender or user_pronouns:
+        user_block_en = "\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\nUSER YOU ARE ROLEPLAYING WITH\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+        user_block_en += line("Name", user_name)
+        user_block_en += line("Gender", user_gender)
+        user_block_en += line("Pronouns", user_pronouns)
+
     if user_lang == "en":
+        identity_en = (
+            f"Name: {name}\n"
+            + line("Gender", gender)
+            + line("Age", age)
+            + f"Description: {description}\n"
+            + line("Appearance", appearance)
+            + line("Voice / Speech style", voice)
+            + f"Personality: {personality}\n"
+            + line("Likes / Hobbies", likes_text)
+            + line("Dislikes / Fears", dislikes)
+            + line("Backstory", backstory)
+            + line("Universe / Lore", universe)
+            + line("Example of how they speak", example_dialogue)
+        )
+
         return f"""You ARE {name}. You are not an AI assistant — you are this character, fully embodied. Stay in character at all times.
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 CHARACTER IDENTITY
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-Name: {name}
-Description: {description}
-Personality: {personality}
-{f'Backstory: {backstory}' if backstory else ''}
-{f'Universe / Lore: {universe}' if universe else ''}
-{f'User you are roleplaying with: {user_name}' if user_name else ''}
-
+{identity_en}{user_block_en}
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 ADULT ROLEPLAY MODE (18+)
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -642,22 +712,32 @@ RESPONSE FORMAT (FOLLOW EXACTLY):
 INITIAL CONTEXT
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 {scenario if scenario else f'You are in your usual environment, true to your essence as {name}.'}
+{f'Opening line / greeting (use it as inspiration for your first message if this is the very first turn): {greeting}' if greeting else ''}
 {memory_section_en}
 Respond in the user's language (English here). Stay {name}. Begin."""
 
     # Spanish (default)
+    identity_es = (
+        f"Nombre: {name}\n"
+        + line("Género", gender)
+        + line("Edad", age)
+        + f"Descripción: {description}\n"
+        + line("Apariencia", appearance)
+        + line("Voz / Forma de hablar", voice)
+        + f"Personalidad: {personality}\n"
+        + line("Le gusta / Aficiones", likes_text)
+        + line("No le gusta / Miedos", dislikes)
+        + line("Historia", backstory)
+        + line("Universo / Lore", universe)
+        + line("Ejemplo de cómo habla", example_dialogue)
+    )
+
     return f"""Eres {name}. NO eres un asistente de IA — ERES este personaje completamente. Permanece en personaje en todo momento.
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 IDENTIDAD DEL PERSONAJE
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-Nombre: {name}
-Descripción: {description}
-Personalidad: {personality}
-{f'Historia: {backstory}' if backstory else ''}
-{f'Universo / Lore: {universe}' if universe else ''}
-{f'Usuario con el que haces roleplay: {user_name}' if user_name else ''}
-
+{identity_es}{user_block_es}
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 MODO ROLEPLAY ADULTO (18+)
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -716,11 +796,11 @@ FORMATO DE RESPUESTA (SÍGUELO EXACTAMENTE):
 CONTEXTO INICIAL
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 {scenario if scenario else f'Te encuentras en tu entorno habitual, fiel a tu esencia como {name}.'}
+{f'Saludo inicial (úsalo como inspiración para tu primer mensaje si este es el primer turno): {greeting}' if greeting else ''}
 {memory_section_es}
 Responde en el idioma del usuario (español aquí). Mantén a {name}. Empieza."""
 
-
-async def generate_ai_response(character: Dict[str, Any], chat_id: str, user_message: str, history: List[Dict], user_lang: str = "es", user_name: str = "") -> str:
+async def generate_ai_response(character: Dict[str, Any], chat_id: str, user_message: str, history: List[Dict], user_lang: str = "es", user_name: str = "", user_gender: str = "", user_pronouns: str = "") -> str:
     """Generate AI response using Claude Sonnet 4.5 with explicit history-based memory.
 
     Memory strategy: we embed the last N turns of conversation directly into the system prompt,
@@ -733,6 +813,8 @@ async def generate_ai_response(character: Dict[str, Any], chat_id: str, user_mes
             user_lang=user_lang,
             history=history,
             user_name=user_name,
+            user_gender=user_gender,
+            user_pronouns=user_pronouns,
         )
 
         chat = LlmChat(
@@ -781,6 +863,8 @@ async def send_message(
         chat.get("messages", []),
         user_lang,
         user_name=user.get("name", ""),
+        user_gender=user.get("gender", ""),
+        user_pronouns=user.get("pronouns", ""),
     )
     
     assistant_msg = {
@@ -804,77 +888,6 @@ async def send_message(
         "success": True,
     }
 
-
-@api_router.post("/generate-image")
-async def generate_image(
-    req: ImageGenRequest,
-    authorization: Optional[str] = Header(None),
-    session_token: Optional[str] = Cookie(None)
-):
-    user = await require_user(authorization, session_token)
-    
-    if not req.prompt:
-        raise HTTPException(400, "Prompt required")
-    
-    image_url = None
-    image_data_url = None
-    
-    try:
-        # If chatId provided, build a contextual prompt from chat
-        full_prompt = req.prompt
-        if req.chatId:
-            chat = await db.chats.find_one({"chat_id": req.chatId, "user_id": user["user_id"]}, {"_id": 0})
-            if chat:
-                character = await db.characters.find_one({"character_id": chat["character_id"]}, {"_id": 0})
-                # Get last few messages to build context
-                last_msgs = chat.get("messages", [])[-4:]
-                context = " ".join([m.get("content", "")[:200] for m in last_msgs])
-                char_desc = character.get("description", "") if character else ""
-                full_prompt = f"Cinematic scene illustration, photorealistic, dramatic lighting. Character: {char_desc}. Scene: {req.prompt}. Context: {context[:500]}"
-        
-        # Generate using Gemini Nano Banana
-        chat = LlmChat(
-            api_key=EMERGENT_LLM_KEY,
-            session_id=f"img_{uuid.uuid4().hex[:8]}",
-            system_message="You are a professional cinematic image generator. Create immersive, detailed scenes.",
-        ).with_model("gemini", "gemini-3.1-flash-image-preview").with_params(modalities=["image", "text"])
-        
-        msg = UserMessage(text=full_prompt)
-        text, images = await chat.send_message_multimodal_response(msg)
-        
-        if images and len(images) > 0:
-            img = images[0]
-            mime = img.get("mime_type", "image/png")
-            data = img.get("data", "")
-            image_data_url = f"data:{mime};base64,{data}"
-            image_url = image_data_url
-    except Exception as e:
-        logger.error(f"Image generation error: {e}")
-        # Fallback to placeholder
-        seed = uuid.uuid4().hex[:8]
-        image_url = f"https://picsum.photos/seed/{seed}/640/640"
-    
-    if not image_url:
-        seed = uuid.uuid4().hex[:8]
-        image_url = f"https://picsum.photos/seed/{seed}/640/640"
-    
-    image_message = {
-        "role": "assistant",
-        "content": f"[Escena: {req.prompt}]",
-        "imageUrl": image_url,
-        "timestamp": datetime.now(timezone.utc).isoformat(),
-    }
-    
-    if req.chatId:
-        await db.chats.update_one(
-            {"chat_id": req.chatId, "user_id": user["user_id"]},
-            {
-                "$push": {"messages": image_message},
-                "$set": {"updated_at": datetime.now(timezone.utc)},
-            }
-        )
-    
-    return {"imageUrl": image_url, "message": image_message, "success": True}
 
 
 # Include router

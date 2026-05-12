@@ -3,12 +3,11 @@ import { Button } from './ui/button';
 import { Textarea } from './ui/textarea';
 import { Avatar, AvatarFallback, AvatarImage } from './ui/avatar';
 import { ScrollArea } from './ui/scroll-area';
-import { ArrowLeft, Image as ImageIcon, Send, Loader2 } from 'lucide-react';
+import { ArrowLeft, Send } from 'lucide-react';
 
-export default function ChatView({ t, user, chat, character, onSendMessage, onGenerateScene, onBack }) {
+export default function ChatView({ t, user, chat, character, onSendMessage, onBack }) {
   const [message, setMessage] = useState('');
   const [isGenerating, setIsGenerating] = useState(false);
-  const [isGeneratingImage, setIsGeneratingImage] = useState(false);
   const messagesEndRef = useRef(null);
 
   useEffect(() => {
@@ -27,38 +26,22 @@ export default function ChatView({ t, user, chat, character, onSendMessage, onGe
     }
   };
 
-  const handleGenerateImage = async () => {
-    if (isGeneratingImage) return;
-    setIsGeneratingImage(true);
-    try {
-      await onGenerateScene();
-    } finally {
-      setIsGeneratingImage(false);
-    }
-  };
-
   return (
     <div className="gradient-dark flex flex-col min-h-screen">
       <header className="glass-strong sticky top-0 z-50 border-b border-themed">
-        <div className="container mx-auto px-4 py-3 flex items-center justify-between gap-2">
-          <div className="flex items-center gap-3 min-w-0 flex-1">
-            <Button variant="ghost" onClick={onBack} className="px-2" style={{ color: 'var(--foreground)' }}>
-              <ArrowLeft className="w-4 h-4 sm:mr-2" />
-              <span className="hidden sm:inline">{t.chat.back}</span>
-            </Button>
-            <Avatar className="w-10 h-10">
-              <AvatarImage src={character?.avatar} />
-              <AvatarFallback className="gradient-primary">{character?.name?.[0]?.toUpperCase()}</AvatarFallback>
-            </Avatar>
-            <div className="min-w-0">
-              <h2 className="font-semibold truncate" style={{ color: 'var(--foreground)' }}>{character?.name}</h2>
-              <p className="text-xs" style={{ color: 'var(--muted-foreground)' }}>{t.chat.aiCharacter}</p>
-            </div>
-          </div>
-          <Button variant="outline" onClick={handleGenerateImage} disabled={isGeneratingImage} className="border-themed" style={{ color: 'var(--foreground)' }}>
-            {isGeneratingImage ? <Loader2 className="w-4 h-4 sm:mr-2 animate-spin" /> : <ImageIcon className="w-4 h-4 sm:mr-2" />}
-            <span className="hidden sm:inline">{isGeneratingImage ? t.chat.generatingImage : t.chat.generateScene}</span>
+        <div className="container mx-auto px-4 py-3 flex items-center gap-3">
+          <Button variant="ghost" onClick={onBack} className="px-2" style={{ color: 'var(--foreground)' }}>
+            <ArrowLeft className="w-4 h-4 sm:mr-2" />
+            <span className="hidden sm:inline">{t.chat.back}</span>
           </Button>
+          <Avatar className="w-10 h-10">
+            <AvatarImage src={character?.avatar} />
+            <AvatarFallback className="gradient-primary">{character?.name?.[0]?.toUpperCase()}</AvatarFallback>
+          </Avatar>
+          <div className="min-w-0 flex-1">
+            <h2 className="font-semibold truncate" style={{ color: 'var(--foreground)' }}>{character?.name}</h2>
+            <p className="text-xs" style={{ color: 'var(--muted-foreground)' }}>{t.chat.aiCharacter}</p>
+          </div>
         </div>
       </header>
 

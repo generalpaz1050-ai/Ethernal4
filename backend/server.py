@@ -32,6 +32,85 @@ db = client[os.environ.get('DB_NAME', 'ethernal_db')]
 
 EMERGENT_LLM_KEY = os.environ.get('EMERGENT_LLM_KEY', '')
 
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# Subscription / Role config
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+OWNER_EMAIL = "generalpaz1050@hotmail.com"
+
+PLAN_LIMITS = {
+    "free":   {"messages_per_day": 20,   "max_characters": 3},
+    "silver": {"messages_per_day": 200,  "max_characters": 20},
+    "pro":    {"messages_per_day": 10**9, "max_characters": 10**9},
+}
+
+
+def is_owner(user: Dict[str, Any]) -> bool:
+    return bool(user) and (user.get("role") == "owner" or user.get("email") == OWNER_EMAIL)
+
+
+def get_user_plan(user: Dict[str, Any]) -> str:
+    """Return the active plan key for this user: 'free' | 'silver' | 'pro'."""
+    if is_owner(user):
+        return "pro"
+    sub = user.get("subscription") or {}
+    plan = sub.get("plan")
+    status = sub.get("status")
+    if plan in ("silver", "pro") and status == "active":
+        # Check expiry
+        end = sub.get("currentPeriodEnd")
+        if end:
+            try:
+                if isinstance(end, str):
+                    end_dt = datetime.fromisoformat(end)
+                else:
+                    end_dt = end
+                if end_dt.tzinfo is None:
+                    end_dt = end_dt.replace(tzinfo=timezone.utc)
+                if end_dt > datetime.now(timezone.utc):
+                    return plan
+            except Exception:
+                pass
+        else:
+            return plan
+    return "free"
+
+
+async def check_and_increment_message_quota(user: Dict[str, Any]) -> None:
+    """Raise 403 if user has exceeded their daily message quota. Owner bypasses."""
+    if is_owner(user):
+        return
+    plan = get_user_plan(user)
+    limit = PLAN_LIMITS[plan]["messages_per_day"]
+
+    today = datetime.now(timezone.utc).date().isoformat()
+    usage = user.get("usage") or {}
+    used_today = usage.get("messages_today", 0) if usage.get("date") == today else 0
+
+    if used_today >= limit:
+        raise HTTPException(
+            status_code=429,
+            detail=f"Daily message limit reached for your {plan} plan ({limit}/day). Upgrade to continue."
+        )
+
+    await db.users.update_one(
+        {"user_id": user["user_id"]},
+        {"$set": {"usage": {"date": today, "messages_today": used_today + 1}}},
+    )
+
+
+async def check_character_quota(user: Dict[str, Any]) -> None:
+    """Raise 403 if user has reached their max characters. Owner bypasses."""
+    if is_owner(user):
+        return
+    plan = get_user_plan(user)
+    max_chars = PLAN_LIMITS[plan]["max_characters"]
+    count = await db.characters.count_documents({"user_id": user["user_id"]})
+    if count >= max_chars:
+        raise HTTPException(
+            status_code=403,
+            detail=f"Character limit reached for your {plan} plan ({max_chars}). Upgrade to create more."
+        )
+
 # Create FastAPI app
 app = FastAPI(title="Ethernal API")
 api_router = APIRouter(prefix="/api")
@@ -171,10 +250,26 @@ async def require_user(
     user = await get_current_user(authorization, session_token)
     if not user:
         raise HTTPException(status_code=401, detail="Unauthorized")
+    # Owner bypasses ban check (defensive)
+    if user.get("banned") and not is_owner(user):
+        raise HTTPException(status_code=403, detail="Account banned")
+    return user
+
+
+async def require_owner(
+    authorization: Optional[str] = Header(None),
+    session_token: Optional[str] = Cookie(None)
+) -> Dict[str, Any]:
+    """Middleware: only the platform owner can call this endpoint."""
+    user = await require_user(authorization, session_token)
+    if not is_owner(user):
+        raise HTTPException(status_code=403, detail="Owner only")
     return user
 
 
 def serialize_user(user: Dict[str, Any]) -> Dict[str, Any]:
+    plan = get_user_plan(user) if user else "free"
+    limits = PLAN_LIMITS.get(plan, PLAN_LIMITS["free"])
     return {
         "id": user.get("user_id"),
         "user_id": user.get("user_id"),
@@ -187,6 +282,12 @@ def serialize_user(user: Dict[str, Any]) -> Dict[str, Any]:
         "gender": user.get("gender", ""),
         "age": user.get("age", ""),
         "pronouns": user.get("pronouns", ""),
+        "role": "owner" if is_owner(user) else user.get("role", "user"),
+        "subscription": user.get("subscription") or {"plan": None, "status": None, "currentPeriodEnd": None},
+        "banned": user.get("banned", False),
+        "plan": plan,
+        "limits": limits,
+        "usage": user.get("usage") or {"date": None, "messages_today": 0},
     }
 
 
@@ -209,6 +310,7 @@ async def register(req: RegisterRequest):
         raise HTTPException(400, "User already exists")
     
     user_id = f"user_{uuid.uuid4().hex[:12]}"
+    role = "owner" if req.email.lower() == OWNER_EMAIL.lower() else "user"
     user = {
         "user_id": user_id,
         "email": req.email,
@@ -218,6 +320,10 @@ async def register(req: RegisterRequest):
         "bio": "",
         "theme": "medievalWarm",
         "language": "es",
+        "role": role,
+        "subscription": {"plan": None, "status": None, "currentPeriodEnd": None},
+        "banned": False,
+        "usage": {"date": None, "messages_today": 0},
         "created_at": datetime.now(timezone.utc),
     }
     await db.users.insert_one(user)
@@ -230,6 +336,12 @@ async def login(req: LoginRequest):
     user = await db.users.find_one({"email": req.email})
     if not user or not user.get("password") or not verify_password(req.password, user["password"]):
         raise HTTPException(401, "Invalid credentials")
+    if user.get("banned") and not is_owner(user):
+        raise HTTPException(403, "Account banned")
+    # Auto-promote owner if email matches and role wasn't set yet
+    if req.email.lower() == OWNER_EMAIL.lower() and user.get("role") != "owner":
+        await db.users.update_one({"user_id": user["user_id"]}, {"$set": {"role": "owner"}})
+        user["role"] = "owner"
     token = generate_token(user["user_id"])
     return {"token": token, "user": serialize_user(user)}
 
@@ -265,6 +377,7 @@ async def google_session(request: Request, response: Response):
     user = await db.users.find_one({"email": email})
     if not user:
         user_id = f"user_{uuid.uuid4().hex[:12]}"
+        role = "owner" if (email or "").lower() == OWNER_EMAIL.lower() else "user"
         user = {
             "user_id": user_id,
             "email": email,
@@ -273,16 +386,28 @@ async def google_session(request: Request, response: Response):
             "bio": "",
             "theme": "medievalWarm",
             "language": "es",
+            "role": role,
+            "subscription": {"plan": None, "status": None, "currentPeriodEnd": None},
+            "banned": False,
+            "usage": {"date": None, "messages_today": 0},
             "google_id": data.get("id"),
             "created_at": datetime.now(timezone.utc),
         }
         await db.users.insert_one(user)
     else:
         user_id = user["user_id"]
-        # Update picture if not set
+        updates = {}
         if not user.get("avatar") and picture:
-            await db.users.update_one({"user_id": user_id}, {"$set": {"avatar": picture}})
+            updates["avatar"] = picture
             user["avatar"] = picture
+        # Auto-promote owner if email matches
+        if (email or "").lower() == OWNER_EMAIL.lower() and user.get("role") != "owner":
+            updates["role"] = "owner"
+            user["role"] = "owner"
+        if updates:
+            await db.users.update_one({"user_id": user_id}, {"$set": updates})
+        if user.get("banned") and not is_owner(user):
+            raise HTTPException(403, "Account banned")
     
     # Store session
     expires_at = datetime.now(timezone.utc) + timedelta(days=7)
@@ -417,6 +542,7 @@ async def list_characters(
 @api_router.post("/characters")
 async def create_character(req: CharacterCreate, authorization: Optional[str] = Header(None), session_token: Optional[str] = Cookie(None)):
     user = await require_user(authorization, session_token)
+    await check_character_quota(user)
     char_id = f"char_{uuid.uuid4().hex[:12]}"
     char = {
         "character_id": char_id,
@@ -840,6 +966,7 @@ async def send_message(
     session_token: Optional[str] = Cookie(None)
 ):
     user = await require_user(authorization, session_token)
+    await check_and_increment_message_quota(user)
     chat = await db.chats.find_one({"chat_id": chat_id, "user_id": user["user_id"]}, {"_id": 0})
     if not chat:
         raise HTTPException(404, "Chat not found")
@@ -888,6 +1015,73 @@ async def send_message(
         "success": True,
     }
 
+
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# Admin Routes (Owner only)
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+class SubscriptionUpdate(BaseModel):
+    plan: Optional[str] = None      # "silver" | "pro" | null (to remove)
+    status: Optional[str] = "active"
+    days: Optional[int] = 30        # how many days from now currentPeriodEnd
+
+
+class BanUpdate(BaseModel):
+    banned: bool
+
+
+@api_router.get("/admin/users")
+async def admin_list_users(
+    authorization: Optional[str] = Header(None),
+    session_token: Optional[str] = Cookie(None),
+):
+    await require_owner(authorization, session_token)
+    users = await db.users.find({}, {"_id": 0, "password": 0}).limit(500).to_list(500)
+    return {"users": [serialize_user(u) for u in users]}
+
+
+@api_router.post("/admin/users/{user_id}/subscription")
+async def admin_set_subscription(
+    user_id: str,
+    req: SubscriptionUpdate,
+    authorization: Optional[str] = Header(None),
+    session_token: Optional[str] = Cookie(None),
+):
+    await require_owner(authorization, session_token)
+    target = await db.users.find_one({"user_id": user_id}, {"_id": 0})
+    if not target:
+        raise HTTPException(404, "User not found")
+
+    if req.plan in (None, "", "free"):
+        sub = {"plan": None, "status": None, "currentPeriodEnd": None}
+    else:
+        if req.plan not in ("silver", "pro"):
+            raise HTTPException(400, "Invalid plan")
+        end = datetime.now(timezone.utc) + timedelta(days=req.days or 30)
+        sub = {"plan": req.plan, "status": req.status or "active", "currentPeriodEnd": end}
+
+    await db.users.update_one({"user_id": user_id}, {"$set": {"subscription": sub}})
+    updated = await db.users.find_one({"user_id": user_id}, {"_id": 0, "password": 0})
+    return {"success": True, "user": serialize_user(updated)}
+
+
+@api_router.post("/admin/users/{user_id}/ban")
+async def admin_ban_user(
+    user_id: str,
+    req: BanUpdate,
+    authorization: Optional[str] = Header(None),
+    session_token: Optional[str] = Cookie(None),
+):
+    owner = await require_owner(authorization, session_token)
+    target = await db.users.find_one({"user_id": user_id}, {"_id": 0})
+    if not target:
+        raise HTTPException(404, "User not found")
+    # Prevent owner from banning themselves
+    if target.get("user_id") == owner.get("user_id"):
+        raise HTTPException(400, "Cannot ban yourself")
+    await db.users.update_one({"user_id": user_id}, {"$set": {"banned": bool(req.banned)}})
+    return {"success": True, "user_id": user_id, "banned": bool(req.banned)}
 
 
 # Include router

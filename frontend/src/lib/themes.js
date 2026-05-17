@@ -165,6 +165,11 @@ export function applyTheme(themeName) {
   });
   root.style.setProperty('--gradient-primary', theme.gradients.primary);
   root.style.setProperty('--gradient-dark', theme.gradients.dark);
+  // Expose the active theme on <body> so the AnimatedBackground component
+  // (and any CSS selectors) can react to theme changes.
+  if (typeof document !== 'undefined' && document.body) {
+    document.body.setAttribute('data-theme', themeName);
+  }
   localStorage.setItem('ethernal-theme', themeName);
 }
 

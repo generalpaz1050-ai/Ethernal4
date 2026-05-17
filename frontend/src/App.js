@@ -15,6 +15,7 @@ import OwnerPanel from './components/OwnerPanel';
 import ShopView from './components/ShopView';
 import AuthCallback from './components/AuthCallback';
 import ErrorBoundary from './components/ErrorBoundary';
+import AnimatedBackground from './components/AnimatedBackground';
 import { Flame } from 'lucide-react';
 import { Toaster } from './components/ui/sonner';
 import { toast } from 'sonner';
@@ -441,9 +442,12 @@ function App() {
   return (
     <div className="App notranslate" translate="no">
       <ErrorBoundary>
-        <BrowserRouter>
-          <AppRouter />
-        </BrowserRouter>
+        <AnimatedBackground />
+        <div style={{ position: 'relative', zIndex: 1 }}>
+          <BrowserRouter>
+            <AppRouter />
+          </BrowserRouter>
+        </div>
         <Toaster position="top-right" />
       </ErrorBoundary>
     </div>

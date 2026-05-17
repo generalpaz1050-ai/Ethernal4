@@ -4,15 +4,20 @@ import './App.css';
 import { applyTheme, getSavedTheme } from './lib/themes';
 import { getTranslations } from './lib/translations';
 import { authAPI, charactersAPI, chatsAPI } from './lib/api';
+import { ensureCatalog } from './lib/cosmetics';
 import LandingPage from './components/LandingPage';
 import Dashboard from './components/Dashboard';
 import ChatView from './components/ChatView';
 import ExploreView from './components/ExploreView';
 import ProfileView from './components/ProfileView';
 import SubscriptionView from './components/SubscriptionView';
+import OwnerPanel from './components/OwnerPanel';
+import ShopView from './components/ShopView';
 import AuthCallback from './components/AuthCallback';
+import ErrorBoundary from './components/ErrorBoundary';
 import { Flame } from 'lucide-react';
 import { Toaster } from './components/ui/sonner';
+import { toast } from 'sonner';
 
 function AppRouter() {
   const location = useLocation();
@@ -45,6 +50,11 @@ function MainApp() {
   useEffect(() => {
     applyTheme(currentTheme);
   }, [currentTheme]);
+
+  // Preload cosmetics catalog so frames/banners render correctly across the app.
+  useEffect(() => {
+    ensureCatalog();
+  }, []);
 
   // Check existing auth on mount
   useEffect(() => {
@@ -89,7 +99,7 @@ function MainApp() {
         localStorage.setItem('ethernal-language', u.language);
       }
     } catch (e) {
-      alert(e?.response?.data?.detail || 'Error de autenticación');
+      toast.error(e?.response?.data?.detail || 'Error de autenticación');
     }
   };
 
@@ -134,7 +144,18 @@ function MainApp() {
       await loadCharacters();
       return true;
     } catch (e) {
-      alert('Error al crear personaje: ' + (e?.response?.data?.detail || e.message));
+      toast.error('Error al crear personaje: ' + (e?.response?.data?.detail || e.message));
+      return false;
+    }
+  };
+
+  const updateCharacter = async (id, data) => {
+    try {
+      await charactersAPI.update(id, data);
+      await loadCharacters();
+      return true;
+    } catch (e) {
+      toast.error('Error al actualizar personaje: ' + (e?.response?.data?.detail || e.message));
       return false;
     }
   };
@@ -194,6 +215,70 @@ function MainApp() {
         ...prev,
         messages: (prev.messages || []).filter((m) => !m._optimistic),
       }));
+      if (e?.response?.status === 429) {
+        toast.error(e?.response?.data?.detail || 'Vas demasiado rápido, espera unos segundos.');
+      }
+      throw e;
+    }
+  };
+
+  const regenerateMessage = async () => {
+    if (!currentChat) return null;
+    try {
+      const res = await chatsAPI.regenerate(currentChat._id || currentChat.id);
+      setCurrentChat((prev) => {
+        const msgs = [...(prev.messages || [])];
+        if (msgs.length && msgs[msgs.length - 1].role === 'assistant') {
+          msgs[msgs.length - 1] = res.data.assistantMessage;
+        }
+        return { ...prev, messages: msgs };
+      });
+      return res.data;
+    } catch (e) {
+      const status = e?.response?.status;
+      const detail = e?.response?.data?.detail || 'No se pudo regenerar la respuesta';
+      toast.error(status === 429 ? detail : detail);
+      throw e;
+    }
+  };
+
+  const editUserMessage = async (index, content) => {
+    if (!currentChat) return null;
+    try {
+      const res = await chatsAPI.editMessage(currentChat._id || currentChat.id, index, content, true);
+      setCurrentChat((prev) => ({ ...prev, messages: res.data.messages }));
+      return res.data;
+    } catch (e) {
+      const detail = e?.response?.data?.detail || 'No se pudo editar el mensaje';
+      toast.error(detail);
+      throw e;
+    }
+  };
+
+  const deleteUserMessage = async (index) => {
+    if (!currentChat) return null;
+    try {
+      const res = await chatsAPI.deleteMessage(currentChat._id || currentChat.id, index);
+      setCurrentChat((prev) => ({ ...prev, messages: res.data.messages }));
+      return res.data;
+    } catch (e) {
+      toast.error(e?.response?.data?.detail || 'No se pudo borrar el mensaje');
+      throw e;
+    }
+  };
+
+  const navigateAssistantVariant = async (index, direction) => {
+    if (!currentChat) return null;
+    try {
+      const res = await chatsAPI.variant(currentChat._id || currentChat.id, index, direction);
+      setCurrentChat((prev) => {
+        const msgs = [...(prev.messages || [])];
+        msgs[index] = res.data.message;
+        return { ...prev, messages: msgs };
+      });
+      return res.data;
+    } catch (e) {
+      toast.error(e?.response?.data?.detail || 'No se pudo cambiar la versión');
       throw e;
     }
   };
@@ -250,6 +335,11 @@ function MainApp() {
         chat={currentChat}
         character={currentCharacter}
         onSendMessage={sendMessage}
+        onRegenerate={regenerateMessage}
+        onEditMessage={editUserMessage}
+        onDeleteMessage={deleteUserMessage}
+        onNavigateVariant={navigateAssistantVariant}
+        onChatUpdated={(newChat) => setCurrentChat(newChat)}
         onBack={() => {
           setCurrentView('dashboard');
           loadChats();
@@ -262,6 +352,8 @@ function MainApp() {
     return (
       <ExploreView
         t={t}
+        user={user}
+        onUserUpdate={(patch) => setUser((u) => ({ ...u, ...patch }))}
         onStartChat={startChat}
         onBack={() => setCurrentView('dashboard')}
       />
@@ -290,6 +382,37 @@ function MainApp() {
     );
   }
 
+  if (currentView === 'owner') {
+    return (
+      <OwnerPanel
+        t={t}
+        currentUser={user}
+        onUserUpdate={async () => {
+          try {
+            const res = await authAPI.me();
+            if (res.data?.user) setUser(res.data.user);
+          } catch (e) { /* ignore */ }
+        }}
+        onBack={() => setCurrentView('dashboard')}
+      />
+    );
+  }
+
+  if (currentView === 'shop') {
+    return (
+      <ShopView
+        user={user}
+        onBack={() => setCurrentView('dashboard')}
+        onUserUpdate={async () => {
+          try {
+            const res = await authAPI.me();
+            if (res.data?.user) setUser(res.data.user);
+          } catch (e) { /* ignore */ }
+        }}
+      />
+    );
+  }
+
   return (
     <Dashboard
       t={t}
@@ -299,21 +422,30 @@ function MainApp() {
       onLogout={handleLogout}
       onViewChange={setCurrentView}
       onCreateCharacter={createCharacter}
+      onUpdateCharacter={updateCharacter}
       onDeleteCharacter={deleteCharacter}
       onStartChat={startChat}
       onLoadCharacters={loadCharacters}
       onLoadChats={loadChats}
+      onUserUpdate={async () => {
+        try {
+          const res = await authAPI.me();
+          if (res.data?.user) setUser(res.data.user);
+        } catch (e) { /* ignore */ }
+      }}
     />
   );
 }
 
 function App() {
   return (
-    <div className="App">
-      <BrowserRouter>
-        <AppRouter />
-      </BrowserRouter>
-      <Toaster position="top-right" />
+    <div className="App notranslate" translate="no">
+      <ErrorBoundary>
+        <BrowserRouter>
+          <AppRouter />
+        </BrowserRouter>
+        <Toaster position="top-right" />
+      </ErrorBoundary>
     </div>
   );
 }

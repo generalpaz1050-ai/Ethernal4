@@ -25,3 +25,29 @@
   height: 8px;
   border-radius: 9999px;
 }
+
+/* Chat bubbles */
+.chat-bubble {
+  border-radius: 14px;
+  padding: 14px 16px;
+  border: 1px solid color-mix(in srgb, var(--border) 60%, transparent);
+  background: color-mix(in srgb, var(--card) 70%, transparent);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  animation: bubble-in 0.25s ease-out;
+}
+.chat-bubble.user {
+  background: color-mix(in srgb, var(--primary) 14%, var(--card));
+  border-color: color-mix(in srgb, var(--primary) 35%, transparent);
+  margin-left: auto;
+  max-width: 85%;
+}
+.chat-bubble.assistant {
+  background: color-mix(in srgb, var(--secondary) 55%, var(--card));
+  border-color: color-mix(in srgb, var(--border) 70%, transparent);
+  max-width: 92%;
+}
+@keyframes bubble-in {
+  from { opacity: 0; transform: translateY(6px); }
+  to   { opacity: 1; transform: translateY(0); }
+}

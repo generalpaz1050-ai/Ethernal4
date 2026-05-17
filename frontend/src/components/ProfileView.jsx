@@ -5,9 +5,16 @@ import { Textarea } from './ui/textarea';
 import { Card, CardContent } from './ui/card';
 import { Avatar, AvatarFallback, AvatarImage } from './ui/avatar';
 import { Label } from './ui/label';
+import { Switch } from './ui/switch';
+import { Badge } from './ui/badge';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select';
-import { ArrowLeft, Upload, Palette, Globe, Save } from 'lucide-react';
+import {
+  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
+  AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
+} from './ui/alert-dialog';
+import { ArrowLeft, Upload, Palette, Globe, Save, AlertTriangle, Flame as FlameIcon } from 'lucide-react';
 import { toast } from 'sonner';
+import { avatarRingStyle, getBannerBackground } from '../lib/cosmetics';
 
 export default function ProfileView({ t, user, currentTheme, onUpdateProfile, onBack }) {
   const [formData, setFormData] = useState({
@@ -19,10 +26,15 @@ export default function ProfileView({ t, user, currentTheme, onUpdateProfile, on
     gender: user?.gender || '',
     age: user?.age || '',
     pronouns: user?.pronouns || '',
+    nsfw_enabled: !!user?.nsfw_enabled,
   });
   const [avatarPreview, setAvatarPreview] = useState(user?.avatar || null);
   const [saving, setSaving] = useState(false);
+  const [showNsfwDialog, setShowNsfwDialog] = useState(false);
   const fileRef = useRef(null);
+
+  const bannerBg = getBannerBackground(user?.equipped_banner) ||
+    'linear-gradient(135deg, hsl(var(--primary)) 0%, hsl(var(--card)) 100%)';
 
   const handleAvatar = (e) => {
     const file = e.target.files?.[0];
@@ -41,6 +53,39 @@ export default function ProfileView({ t, user, currentTheme, onUpdateProfile, on
     const ok = await onUpdateProfile(formData);
     setSaving(false);
     if (ok) toast.success(t.profile.changesSaved);
+  };
+
+  const handleNsfwToggle = async (checked) => {
+    // Turning OFF — persist immediately so the switch reflects reality.
+    if (!checked) {
+      setFormData((prev) => ({ ...prev, nsfw_enabled: false }));
+      const ok = await onUpdateProfile({ nsfw_enabled: false });
+      if (ok) toast.success('Contenido NSFW desactivado.');
+      return;
+    }
+    // Turning ON — require explicit 18+ confirmation the first time.
+    if (!user?.age_confirmed) {
+      setShowNsfwDialog(true);
+      return;
+    }
+    setFormData((prev) => ({ ...prev, nsfw_enabled: true }));
+    const ok = await onUpdateProfile({ nsfw_enabled: true });
+    if (ok) toast.success('Contenido NSFW activado.');
+  };
+
+  const confirmAge = async () => {
+    setShowNsfwDialog(false);
+    setSaving(true);
+    // Persist immediately: record the 18+ acceptance and enable NSFW in one call.
+    const ok = await onUpdateProfile({
+      nsfw_enabled: true,
+      age_confirmed: true,
+    });
+    setSaving(false);
+    if (ok) {
+      setFormData((prev) => ({ ...prev, nsfw_enabled: true }));
+      toast.success('Contenido NSFW activado (+18 confirmado).');
+    }
   };
 
   const themeOptions = [
@@ -65,11 +110,13 @@ export default function ProfileView({ t, user, currentTheme, onUpdateProfile, on
       </header>
 
       <main className="container mx-auto px-4 py-8">
-        <Card className="max-w-2xl mx-auto glass-strong border-themed">
-          <CardContent className="py-8">
+        <Card className="max-w-2xl mx-auto glass-strong border-themed overflow-hidden">
+          {/* Equipped banner preview */}
+          <div className="w-full h-32 sm:h-40" style={{ background: bannerBg }} />
+          <CardContent className="py-8 -mt-16">
             <form onSubmit={handleSubmit} className="space-y-6">
               <div className="flex flex-col items-center gap-4">
-                <Avatar className="w-32 h-32 ring-2 ring-themed">
+                <Avatar className="w-32 h-32" style={avatarRingStyle(user?.equipped_frame)}>
                   <AvatarImage src={avatarPreview} />
                   <AvatarFallback className="gradient-primary text-4xl">{(formData.name || 'U')[0]?.toUpperCase()}</AvatarFallback>
                 </Avatar>
@@ -113,6 +160,30 @@ export default function ProfileView({ t, user, currentTheme, onUpdateProfile, on
                 <Input value={formData.pronouns} onChange={(e) => setFormData({ ...formData, pronouns: e.target.value })} placeholder={t.profile.pronounsPlaceholder} className="input-themed mt-1.5" />
               </div>
 
+              {/* NSFW toggle */}
+              <div className="rounded-lg border border-themed p-4" style={{ background: 'rgba(0,0,0,0.18)' }}>
+                <div className="flex items-start justify-between gap-3">
+                  <div className="flex-1">
+                    <Label className="flex items-center gap-2 font-semibold" style={{ color: 'var(--foreground)' }}>
+                      <FlameIcon className="w-4 h-4" style={{ color: '#ef4444' }} />
+                      Contenido NSFW (+18)
+                      {formData.nsfw_enabled && (
+                        <Badge className="text-[10px]" style={{ background: '#ef4444', color: '#fff' }}>ACTIVO</Badge>
+                      )}
+                    </Label>
+                    <p className="text-xs mt-1" style={{ color: 'var(--muted-foreground)' }}>
+                      Permite respuestas adultas y escenas explícitas en tus roleplays. Requiere confirmar
+                      que tienes más de 18 años. Puedes desactivarlo cuando quieras.
+                    </p>
+                  </div>
+                  <Switch
+                    checked={formData.nsfw_enabled}
+                    onCheckedChange={handleNsfwToggle}
+                    data-testid="nsfw-toggle"
+                  />
+                </div>
+              </div>
+
               <div>
                 <Label style={{ color: 'var(--foreground)' }}>
                   <Palette className="w-4 h-4 inline mr-2" /> {t.profile.theme}
@@ -146,6 +217,36 @@ export default function ProfileView({ t, user, currentTheme, onUpdateProfile, on
           </CardContent>
         </Card>
       </main>
+
+      {/* 18+ Confirmation Dialog */}
+      <AlertDialog open={showNsfwDialog} onOpenChange={setShowNsfwDialog}>
+        <AlertDialogContent className="glass-strong border-themed">
+          <AlertDialogHeader>
+            <AlertDialogTitle className="flex items-center gap-2">
+              <AlertTriangle className="w-5 h-5" style={{ color: '#ef4444' }} />
+              Confirmación de edad
+            </AlertDialogTitle>
+            <AlertDialogDescription className="space-y-2 pt-2">
+              <span className="block">
+                Para activar contenido NSFW debes <strong>confirmar que tienes 18 años o más</strong>.
+              </span>
+              <span className="block text-xs" style={{ color: 'var(--muted-foreground)' }}>
+                Al continuar declaras que cumples la mayoría de edad en tu país y aceptas
+                explorar contenido adulto y narrativas explícitas bajo tu responsabilidad.
+              </span>
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancelar</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={confirmAge}
+              className="bg-red-600 hover:bg-red-700 text-white"
+            >
+              Soy mayor de 18 — Activar
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

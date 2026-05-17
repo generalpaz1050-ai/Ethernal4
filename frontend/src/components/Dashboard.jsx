@@ -10,16 +10,22 @@ import { Badge } from './ui/badge';
 import { Label } from './ui/label';
 import { Checkbox } from './ui/checkbox';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select';
-import { Flame, Plus, MessageCircle, LogOut, Settings, Search, Bot, Upload, Wand2, Sparkles, Trash2, Heart, Crown } from 'lucide-react';
-import { charactersAPI } from '../lib/api';
+import { Flame, Plus, MessageCircle, LogOut, Settings, Search, Bot, Upload, Wand2, Sparkles, Trash2, Heart, Crown, Pencil, ShoppingBag, Coins, Bookmark } from 'lucide-react';
+import { charactersAPI, tagsAPI } from '../lib/api';
+import { avatarRingStyle } from '../lib/cosmetics';
+import Countdown from './Countdown';
+import DailyBox from './DailyBox';
+import { toast } from 'sonner';
 
-export default function Dashboard({ t, user, characters, chats, onLogout, onViewChange, onCreateCharacter, onDeleteCharacter, onStartChat, onLoadCharacters, onLoadChats }) {
+export default function Dashboard({ t, user, characters, chats, onLogout, onViewChange, onCreateCharacter, onUpdateCharacter, onDeleteCharacter, onStartChat, onLoadCharacters, onLoadChats, onUserUpdate }) {
   const [showCreate, setShowCreate] = useState(false);
+  const [editingId, setEditingId] = useState(null);
   const [showDelete, setShowDelete] = useState(false);
   const [toDelete, setToDelete] = useState(null);
   const [publicChars, setPublicChars] = useState([]);
   const [searchQuery, setSearchQuery] = useState('');
   const [filterType, setFilterType] = useState('all');
+  const [activeTab, setActiveTab] = useState(() => localStorage.getItem('ethernal-dashboard-tab') || 'characters');
   const [newChar, setNewChar] = useState({
     name: '', avatar: '', description: '', personality: '',
     backstory: '', scenario: '', universe: '', isPublic: false,
@@ -27,12 +33,20 @@ export default function Dashboard({ t, user, characters, chats, onLogout, onView
     likes: '', dislikes: '', tags: '', greeting: '', exampleDialogue: '',
   });
   const [imagePreview, setImagePreview] = useState(null);
+  const [genAvatarLoading, setGenAvatarLoading] = useState(false);
+  const [defaultTags, setDefaultTags] = useState([]);
   const fileInputRef = useRef(null);
 
   useEffect(() => {
     onLoadCharacters();
     onLoadChats();
     loadPublic();
+    (async () => {
+      try {
+        const r = await tagsAPI.defaults();
+        setDefaultTags(r.data.tags || []);
+      } catch (e) { /* ignore */ }
+    })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -54,11 +68,38 @@ export default function Dashboard({ t, user, characters, chats, onLogout, onView
     reader.readAsDataURL(file);
   };
 
+  const handleGenerateAvatar = async () => {
+    setGenAvatarLoading(true);
+    try {
+      const res = await charactersAPI.generateAvatar({
+        name: newChar.name,
+        gender: newChar.gender,
+        age: newChar.age,
+        appearance: newChar.appearance,
+        universe: newChar.universe,
+        prompt: newChar.description,
+      });
+      const dataUrl = res.data?.avatar;
+      if (dataUrl) {
+        setImagePreview(dataUrl);
+        setNewChar((prev) => ({ ...prev, avatar: dataUrl }));
+      }
+    } catch (err) {
+      const msg = err?.response?.data?.detail || 'No se pudo generar el avatar';
+      toast.error(msg);
+    } finally {
+      setGenAvatarLoading(false);
+    }
+  };
+
   const handleCreate = async (e) => {
     e.preventDefault();
-    const ok = await onCreateCharacter(newChar);
+    const ok = editingId
+      ? await onUpdateCharacter(editingId, newChar)
+      : await onCreateCharacter(newChar);
     if (ok) {
       setShowCreate(false);
+      setEditingId(null);
       setNewChar({
         name: '', avatar: '', description: '', personality: '',
         backstory: '', scenario: '', universe: '', isPublic: false,
@@ -67,6 +108,48 @@ export default function Dashboard({ t, user, characters, chats, onLogout, onView
       });
       setImagePreview(null);
     }
+  };
+
+  const openEdit = (c) => {
+    setEditingId(c._id || c.id);
+    setNewChar({
+      name: c.name || '',
+      avatar: c.avatar || '',
+      description: c.description || '',
+      personality: c.personality || '',
+      backstory: c.backstory || '',
+      scenario: c.scenario || '',
+      universe: c.universe || '',
+      isPublic: !!c.isPublic,
+      gender: c.gender || '',
+      age: c.age || '',
+      appearance: c.appearance || '',
+      voice: c.voice || '',
+      likes: c.likesText || c.likes_text || '',
+      dislikes: c.dislikes || '',
+      tags: c.tags || '',
+      greeting: c.greeting || '',
+      exampleDialogue: c.exampleDialogue || c.example_dialogue || '',
+    });
+    setImagePreview(c.avatar || null);
+    setShowCreate(true);
+  };
+
+  const openCreateFresh = () => {
+    setEditingId(null);
+    setNewChar({
+      name: '', avatar: '', description: '', personality: '',
+      backstory: '', scenario: '', universe: '', isPublic: false,
+      gender: '', age: '', appearance: '', voice: '',
+      likes: '', dislikes: '', tags: '', greeting: '', exampleDialogue: '',
+    });
+    setImagePreview(null);
+    setShowCreate(true);
+  };
+
+  const closeForm = (open) => {
+    setShowCreate(open);
+    if (!open) setEditingId(null);
   };
 
   const handleDelete = async () => {
@@ -80,7 +163,8 @@ export default function Dashboard({ t, user, characters, chats, onLogout, onView
     .filter(c =>
       c.name?.toLowerCase().includes(searchQuery.toLowerCase()) ||
       c.description?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      c.universe?.toLowerCase().includes(searchQuery.toLowerCase())
+      c.universe?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      (c.tags || '').toLowerCase().includes(searchQuery.toLowerCase())
     )
     .sort((a, b) => {
       if (filterType === 'popular') return (b.likes || 0) - (a.likes || 0);
@@ -98,26 +182,64 @@ export default function Dashboard({ t, user, characters, chats, onLogout, onView
             <h1 className="text-xl sm:text-2xl font-bold text-gradient">Ethernal</h1>
           </div>
           <div className="flex items-center gap-1 sm:gap-2">
-            <Button variant="ghost" onClick={() => onViewChange('explore')} className="px-2 sm:px-3" style={{ color: 'var(--foreground)' }}>
+            <Button variant="ghost" onClick={() => onViewChange('explore')} className="px-2 sm:px-3" style={{ color: 'var(--foreground)' }} data-testid="nav-explore-btn">
               <Search className="w-4 h-4 sm:mr-2" />
               <span className="hidden sm:inline">{t.dashboard.explore}</span>
             </Button>
-            <Button variant="ghost" onClick={() => onViewChange('subscription')} className="px-2 sm:px-3" style={{ color: 'var(--foreground)' }}>
+            <Button variant="ghost" onClick={() => onViewChange('shop')} className="px-2 sm:px-3" style={{ color: 'var(--foreground)' }} data-testid="nav-shop-btn">
+              <ShoppingBag className="w-4 h-4 sm:mr-2" />
+              <span className="hidden sm:inline">Tienda</span>
+            </Button>
+            <Button variant="ghost" onClick={() => onViewChange('subscription')} className="px-2 sm:px-3" style={{ color: 'var(--foreground)' }} data-testid="nav-subscription-btn">
               <Crown className="w-4 h-4 sm:mr-2" />
               <span className="hidden sm:inline">{t.dashboard.subscription || 'Mi Plan'}</span>
             </Button>
-            <Button variant="ghost" onClick={() => onViewChange('profile')} className="px-2 sm:px-3" style={{ color: 'var(--foreground)' }}>
+            {(user?.role === 'owner' || user?.is_owner) && (
+              <Button
+                variant="ghost"
+                onClick={() => onViewChange('owner')}
+                className="px-2 sm:px-3"
+                style={{ color: 'var(--primary)' }}
+                data-testid="nav-owner-btn"
+              >
+                <Crown className="w-4 h-4 sm:mr-2" />
+                <span className="hidden sm:inline">Owner</span>
+              </Button>
+            )}
+            <Button variant="ghost" onClick={() => onViewChange('profile')} className="px-2 sm:px-3" style={{ color: 'var(--foreground)' }} data-testid="nav-profile-btn">
               <Settings className="w-4 h-4 sm:mr-2" />
               <span className="hidden sm:inline">{t.dashboard.editProfile}</span>
             </Button>
             <div className="hidden md:flex items-center gap-2 px-2">
-              <Avatar className="w-8 h-8">
+              <div className="hidden lg:flex flex-col items-end px-2 py-1 rounded-lg glass">
+                <div className="flex items-center gap-1">
+                  <Coins className="w-3.5 h-3.5" style={{ color: 'var(--primary)' }} />
+                  <span className="text-xs font-semibold" style={{ color: 'var(--foreground)' }}>
+                    {(user?.kyr_balance || 0).toLocaleString()} Kyr
+                  </span>
+                </div>
+                {user?.kyr_next_grant_at && (
+                  <Countdown
+                    targetIso={user.kyr_next_grant_at}
+                    className="text-[9px] mt-0.5"
+                    style={{ color: 'var(--muted-foreground)' }}
+                    prefix="+"
+                    readyText="¡Recompensa lista!"
+                  />
+                )}
+              </div>
+              <Avatar className="w-8 h-8" style={avatarRingStyle(user?.equipped_frame)}>
                 <AvatarImage src={user?.avatar} />
                 <AvatarFallback className="gradient-primary text-xs">{user?.name?.[0]?.toUpperCase()}</AvatarFallback>
               </Avatar>
-              <span className="text-sm" style={{ color: 'var(--foreground)' }}>{user?.name}</span>
+              <div className="flex flex-col leading-tight">
+                <span className="text-sm" style={{ color: 'var(--foreground)' }}>{user?.name}</span>
+                <span className="text-[10px] uppercase tracking-wider font-semibold" style={{ color: 'var(--primary)' }}>
+                  {user?.plan === 'diamond' ? 'Diamond' : user?.plan === 'gold' ? 'Gold' : 'Silver'}
+                </span>
+              </div>
             </div>
-            <Button variant="ghost" onClick={onLogout} className="px-2" style={{ color: 'var(--foreground)' }}>
+            <Button variant="ghost" onClick={onLogout} className="px-2" style={{ color: 'var(--foreground)' }} data-testid="logout-btn">
               <LogOut className="w-4 h-4" />
             </Button>
           </div>
@@ -125,7 +247,44 @@ export default function Dashboard({ t, user, characters, chats, onLogout, onView
       </header>
 
       <main className="container mx-auto px-4 py-6">
-        <Tabs defaultValue="characters" className="space-y-6">
+        {/* Ad banner — only shown to Silver plan users (free tier). Hidden for Gold, Diamond, and Owner. */}
+        {user?.plan === 'silver' && (
+          <div
+            className="mb-6 rounded-lg border border-themed flex items-center justify-between gap-4 px-4 py-3"
+            style={{
+              background: 'color-mix(in srgb, var(--secondary) 60%, transparent)',
+            }}
+            data-testid="silver-ad-banner"
+          >
+            <div className="flex items-center gap-3 min-w-0">
+              <div
+                className="px-2 py-0.5 text-[10px] uppercase tracking-wider font-bold rounded"
+                style={{ background: 'var(--muted)', color: 'var(--muted-foreground)' }}
+              >
+                Anuncio
+              </div>
+              <p className="text-sm truncate" style={{ color: 'var(--foreground)' }}>
+                <span className="font-semibold">¿Sin anuncios y más personajes al día?</span>
+                <span style={{ color: 'var(--muted-foreground)' }}> Mejora a Gold o Diamond.</span>
+              </p>
+            </div>
+            <Button
+              onClick={() => onViewChange('subscription')}
+              size="sm"
+              className="gradient-primary font-semibold flex-shrink-0"
+              data-testid="ad-upgrade-btn"
+            >
+              <Crown className="w-4 h-4 mr-1.5" /> Mejorar plan
+            </Button>
+          </div>
+        )}
+
+        {/* Daily Kyr box (mini roulette) */}
+        <div className="mb-6">
+          <DailyBox onClaimed={() => onUserUpdate && onUserUpdate()} />
+        </div>
+
+        <Tabs value={activeTab} onValueChange={(v) => { setActiveTab(v); localStorage.setItem('ethernal-dashboard-tab', v); }} className="space-y-6">
           <TabsList className="glass">
             <TabsTrigger value="characters">{t.dashboard.myCharacters}</TabsTrigger>
             <TabsTrigger value="chats">{t.dashboard.recentChats}</TabsTrigger>
@@ -136,17 +295,21 @@ export default function Dashboard({ t, user, characters, chats, onLogout, onView
           <TabsContent value="characters" className="space-y-6">
             <div className="flex items-center justify-between gap-4">
               <h2 className="text-2xl sm:text-3xl font-bold" style={{ color: 'var(--foreground)' }}>{t.dashboard.yourCharacters}</h2>
-              <Dialog open={showCreate} onOpenChange={setShowCreate}>
+              <Dialog open={showCreate} onOpenChange={closeForm}>
                 <DialogTrigger asChild>
-                  <Button className="gradient-primary hover:opacity-90 font-semibold">
+                  <Button onClick={openCreateFresh} className="gradient-primary hover:opacity-90 font-semibold" data-testid="open-create-character-btn">
                     <Plus className="w-4 h-4 sm:mr-2" />
                     <span className="hidden sm:inline">{t.dashboard.createCharacter}</span>
                   </Button>
                 </DialogTrigger>
                 <DialogContent className="glass-strong border-themed max-w-2xl max-h-[90vh] overflow-y-auto">
                   <DialogHeader>
-                    <DialogTitle style={{ color: 'var(--foreground)' }}>{t.character.createNew}</DialogTitle>
-                    <DialogDescription style={{ color: 'var(--muted-foreground)' }}>{t.character.designCharacter}</DialogDescription>
+                    <DialogTitle style={{ color: 'var(--foreground)' }}>
+                      {editingId ? (t.character.editTitle || 'Editar personaje') : t.character.createNew}
+                    </DialogTitle>
+                    <DialogDescription style={{ color: 'var(--muted-foreground)' }}>
+                      {editingId ? (t.character.editDescription || 'Actualiza los datos de tu personaje. Los cambios afectarán a los chats futuros.') : t.character.designCharacter}
+                    </DialogDescription>
                   </DialogHeader>
                   <form onSubmit={handleCreate} className="space-y-4">
                     <div>
@@ -159,15 +322,28 @@ export default function Dashboard({ t, user, characters, chats, onLogout, onView
                         )}
                         <div className="flex-1 space-y-2">
                           <input ref={fileInputRef} type="file" accept="image/*" onChange={handleImage} className="hidden" />
-                          <Button type="button" variant="outline" onClick={() => fileInputRef.current?.click()} className="w-full border-themed" style={{ color: 'var(--foreground)' }}>
+                          <Button type="button" variant="outline" onClick={() => fileInputRef.current?.click()} className="w-full border-themed" style={{ color: 'var(--foreground)' }} data-testid="upload-avatar-btn">
                             <Upload className="w-4 h-4 mr-2" /> {t.character.uploadImage}
                           </Button>
+                          <Button
+                            type="button"
+                            onClick={handleGenerateAvatar}
+                            disabled={genAvatarLoading}
+                            className="w-full gradient-primary font-semibold hover:opacity-90"
+                            data-testid="generate-avatar-btn"
+                          >
+                            <Sparkles className="w-4 h-4 mr-2" />
+                            {genAvatarLoading ? 'Generando…' : 'Generar con IA (Nano Banana)'}
+                          </Button>
+                          <p className="text-xs" style={{ color: 'var(--muted-foreground)' }}>
+                            Usa el nombre, género, edad, apariencia y descripción para crear un retrato.
+                          </p>
                         </div>
                       </div>
                     </div>
                     <div>
                       <Label style={{ color: 'var(--foreground)' }}>{t.character.nameLabel} *</Label>
-                      <Input value={newChar.name} onChange={(e) => setNewChar({ ...newChar, name: e.target.value })} placeholder={t.character.namePlaceholder} required className="input-themed mt-1.5" />
+                      <Input value={newChar.name} onChange={(e) => setNewChar({ ...newChar, name: e.target.value })} placeholder={t.character.namePlaceholder} required className="input-themed mt-1.5" data-testid="char-name-input" />
                     </div>
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                       <div>
@@ -237,13 +413,56 @@ export default function Dashboard({ t, user, characters, chats, onLogout, onView
                     <div>
                       <Label style={{ color: 'var(--foreground)' }}>{t.character.tagsLabel}</Label>
                       <Input value={newChar.tags} onChange={(e) => setNewChar({ ...newChar, tags: e.target.value })} placeholder={t.character.tagsPlaceholder} className="input-themed mt-1.5" />
+                      {defaultTags.length > 0 && (
+                        <div className="mt-2">
+                          <p className="text-[11px] mb-1.5" style={{ color: 'var(--muted-foreground)' }}>
+                            Sugerencias (clic para añadir):
+                          </p>
+                          <div className="flex flex-wrap gap-1.5 max-h-32 overflow-y-auto">
+                            {defaultTags.map((tg) => {
+                              const selected = newChar.tags
+                                .split(',')
+                                .map((x) => x.trim().toLowerCase())
+                                .includes(tg.toLowerCase());
+                              return (
+                                <button
+                                  type="button"
+                                  key={tg}
+                                  onClick={() => {
+                                    const existing = newChar.tags
+                                      .split(',')
+                                      .map((x) => x.trim())
+                                      .filter(Boolean);
+                                    let next;
+                                    if (selected) {
+                                      next = existing.filter((x) => x.toLowerCase() !== tg.toLowerCase());
+                                    } else {
+                                      next = [...existing, tg];
+                                    }
+                                    setNewChar({ ...newChar, tags: next.join(', ') });
+                                  }}
+                                  className="text-[11px] px-2 py-0.5 rounded-full border transition-colors"
+                                  style={{
+                                    borderColor: selected ? 'var(--primary)' : 'var(--border)',
+                                    background: selected ? 'var(--primary)' : 'transparent',
+                                    color: selected ? 'var(--primary-foreground)' : 'var(--muted-foreground)',
+                                  }}
+                                >
+                                  {tg}
+                                </button>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      )}
                     </div>
                     <div className="flex items-center gap-2">
                       <Checkbox id="isPublic" checked={newChar.isPublic} onCheckedChange={(v) => setNewChar({ ...newChar, isPublic: !!v })} />
                       <Label htmlFor="isPublic" style={{ color: 'var(--foreground)' }}>{t.character.makePublic}</Label>
                     </div>
-                    <Button type="submit" className="w-full gradient-primary hover:opacity-90">
-                      <Sparkles className="w-4 h-4 mr-2" /> {t.character.createBtn}
+                    <Button type="submit" className="w-full gradient-primary hover:opacity-90" data-testid="submit-create-character-btn">
+                      <Sparkles className="w-4 h-4 mr-2" />
+                      {editingId ? (t.character.saveChanges || 'Guardar cambios') : t.character.createBtn}
                     </Button>
                   </form>
                 </DialogContent>
@@ -269,7 +488,7 @@ export default function Dashboard({ t, user, characters, chats, onLogout, onView
                   <CardContent className="py-12 text-center">
                     <Bot className="w-16 h-16 mx-auto mb-4 opacity-50" style={{ color: 'var(--primary)' }} />
                     <p className="mb-4" style={{ color: 'var(--muted-foreground)' }}>{t.dashboard.noCharactersYet}</p>
-                    <Button onClick={() => setShowCreate(true)} className="gradient-primary hover:opacity-90">{t.dashboard.createFirstCharacter}</Button>
+                    <Button onClick={openCreateFresh} className="gradient-primary hover:opacity-90">{t.dashboard.createFirstCharacter}</Button>
                   </CardContent>
                 </Card>
               ) : characters.map((c) => (
@@ -286,11 +505,45 @@ export default function Dashboard({ t, user, characters, chats, onLogout, onView
                     <CardDescription className="line-clamp-2" style={{ color: 'var(--muted-foreground)' }}>{c.description}</CardDescription>
                   </CardHeader>
                   <CardContent>
+                    {c.isPublic && (
+                      <div
+                        className="flex items-center justify-center gap-4 mb-3 pb-3 text-xs border-b"
+                        style={{ color: 'var(--muted-foreground)', borderColor: 'var(--border)' }}
+                      >
+                        <span className="inline-flex items-center gap-1" title="Likes recibidos" data-testid={`own-likes-${c._id || c.id}`}>
+                          <Heart className="w-3.5 h-3.5" style={{ color: '#ef4444' }} fill={(c.likes || 0) > 0 ? '#ef4444' : 'none'} />
+                          <span className="font-semibold tabular-nums" style={{ color: 'var(--foreground)' }}>{c.likes || 0}</span>
+                          <span>likes</span>
+                        </span>
+                        <span className="inline-flex items-center gap-1" title="Veces guardado" data-testid={`own-saves-${c._id || c.id}`}>
+                          <Bookmark className="w-3.5 h-3.5" style={{ color: 'var(--primary)' }} fill={(c.saves || 0) > 0 ? 'currentColor' : 'none'} />
+                          <span className="font-semibold tabular-nums" style={{ color: 'var(--foreground)' }}>{c.saves || 0}</span>
+                          <span>guardados</span>
+                        </span>
+                      </div>
+                    )}
                     <div className="flex gap-2">
                       <Button onClick={() => onStartChat(c)} className="flex-1 gradient-primary hover:opacity-90 font-semibold">
                         <MessageCircle className="w-4 h-4 mr-2" /> {t.dashboard.startChat}
                       </Button>
-                      <Button onClick={() => { setToDelete(c); setShowDelete(true); }} variant="outline" className="border-themed" style={{ color: 'var(--destructive)' }}>
+                      <Button
+                        onClick={() => openEdit(c)}
+                        variant="outline"
+                        className="border-themed"
+                        style={{ color: 'var(--primary)' }}
+                        title={t.character.editTitle || 'Editar personaje'}
+                        data-testid={`edit-char-${c._id || c.id}`}
+                      >
+                        <Pencil className="w-4 h-4" />
+                      </Button>
+                      <Button
+                        onClick={() => { setToDelete(c); setShowDelete(true); }}
+                        variant="outline"
+                        className="border-themed"
+                        style={{ color: 'var(--destructive)' }}
+                        title={t.character.deleteTitle}
+                        data-testid={`delete-char-${c._id || c.id}`}
+                      >
                         <Trash2 className="w-4 h-4" />
                       </Button>
                     </div>

@@ -34,16 +34,67 @@ export const charactersAPI = {
   update: (id, data) => api.put(`/characters/${id}`, data),
   delete: (id) => api.delete(`/characters/${id}`),
   like: (id) => api.post(`/characters/${id}/like`),
+  save: (id) => api.post(`/characters/${id}/save`),
+  saved: () => api.get('/me/saved-characters'),
+  generateAvatar: (data) => api.post('/characters/generate-avatar', data),
 };
 
 export const chatsAPI = {
   list: () => api.get('/chats'),
   create: (characterId) => api.post('/chats', { characterId }),
   sendMessage: (chatId, message) => api.post(`/chats/${chatId}/message`, { message }),
+  regenerate: (chatId) => api.post(`/chats/${chatId}/regenerate`),
+  editMessage: (chatId, index, content, regenerate = true) =>
+    api.put(`/chats/${chatId}/messages/${index}`, { content, regenerate }),
+  deleteMessage: (chatId, index) => api.delete(`/chats/${chatId}/messages/${index}`),
+  variant: (chatId, index, direction) =>
+    api.post(`/chats/${chatId}/messages/${index}/variant`, { direction }),
+  setEngine: (chatId, engine) => api.post(`/chats/${chatId}/engine`, { engine }),
+  save: (chatId, name) => api.post(`/chats/${chatId}/save`, { name: name || null }),
+  reset: (chatId, opts = {}) => api.post(`/chats/${chatId}/reset`, {
+    save_first: !!opts.saveFirst,
+    save_name: opts.saveName || null,
+  }),
+  archives: (chatId) => api.get(`/chats/${chatId}/archives`),
+};
+
+export const archivesAPI = {
+  get: (archiveId) => api.get(`/archives/${archiveId}`),
+  delete: (archiveId) => api.delete(`/archives/${archiveId}`),
+  restore: (archiveId) => api.post(`/archives/${archiveId}/restore`),
+};
+
+export const enginesAPI = {
+  list: () => api.get('/engines'),
 };
 
 export const subscriptionAPI = {
   plans: () => api.get('/subscription/plans'),
   stats: () => api.get('/me/stats'),
   checkout: (plan) => api.post('/subscription/checkout', { plan }),
+};
+
+export const tagsAPI = {
+  defaults: () => api.get('/tags/default'),
+};
+
+export const adminAPI = {
+  listUsers: () => api.get('/admin/users'),
+  setSubscription: (userId, data) => api.post(`/admin/users/${userId}/subscription`, data),
+  banUser: (userId, banned) => api.post(`/admin/users/${userId}/ban`, { banned }),
+  setKyr: (userId, amount, mode = 'add') => api.post(`/admin/users/${userId}/kyr`, { amount, mode }),
+  listCharacters: (params = {}) => api.get('/admin/characters', { params }),
+  deleteCharacter: (charId) => api.delete(`/admin/characters/${charId}`),
+};
+
+export const shopAPI = {
+  items: () => api.get('/shop/items'),
+  wallet: () => api.get('/me/wallet'),
+  purchase: (kind, item_id) => api.post('/shop/purchase', { kind, item_id }),
+  equip: (kind, item_id) => api.post('/me/equip', { kind, item_id }),
+};
+
+export const dailyBoxAPI = {
+  status: () => api.get('/me/daily-box'),
+  claim: () => api.post('/me/daily-box/claim'),
 };

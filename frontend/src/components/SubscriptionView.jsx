@@ -70,11 +70,11 @@ export default function SubscriptionView({ t, user, onBack }) {
 
   const currentPlanKey = stats?.plan || 'silver';
   const isOwner = !!stats?.is_owner;
-  const messagesToday = stats?.messages_today || 0;
-  const messagesLimit = stats?.messages_limit;
-  const progressPct = stats?.is_unlimited
+  const charsToday = stats?.characters_created_today || 0;
+  const charsLimit = stats?.characters_daily_limit;
+  const progressPct = stats?.characters_unlimited
     ? 0
-    : Math.min(100, Math.round((messagesToday / Math.max(1, Number(messagesLimit))) * 100));
+    : Math.min(100, Math.round((charsToday / Math.max(1, Number(charsLimit))) * 100));
 
   return (
     <div className="gradient-dark min-h-screen">
@@ -124,22 +124,40 @@ export default function SubscriptionView({ t, user, onBack }) {
               </div>
 
               <CardContent className="py-6 space-y-6">
-                {/* Daily messages progress */}
+                {/* Daily character creation progress */}
                 <div>
                   <div className="flex items-center justify-between mb-2 text-sm">
                     <span className="flex items-center gap-2" style={{ color: 'var(--muted-foreground)' }}>
-                      <MessageCircle className="w-4 h-4" /> Mensajes hoy
+                      <Users className="w-4 h-4" /> Personajes creados hoy
                     </span>
                     <span className="font-semibold" style={{ color: 'var(--foreground)' }}>
-                      {messagesToday} / {messagesLimit}
+                      {charsToday} / {charsLimit}
                     </span>
                   </div>
-                  {!stats?.is_unlimited ? (
+                  {!stats?.characters_unlimited ? (
                     <Progress value={progressPct} className="h-2" />
                   ) : (
                     <p className="text-xs" style={{ color: 'var(--muted-foreground)' }}>Sin límite diario</p>
                   )}
                 </div>
+
+                {/* Messages info (unlimited on all plans) */}
+                <div className="flex items-center gap-2 text-sm" style={{ color: 'var(--muted-foreground)' }}>
+                  <MessageCircle className="w-4 h-4" />
+                  <span>Mensajes: ilimitados en todos los planes</span>
+                </div>
+
+                {/* Ads notice */}
+                {stats?.has_ads ? (
+                  <div className="rounded-lg px-3 py-2 text-xs flex items-center gap-2" style={{ background: 'color-mix(in srgb, var(--destructive) 10%, transparent)', color: 'var(--foreground)' }}>
+                    <span className="font-semibold">Tu plan actual incluye anuncios.</span>
+                    <span style={{ color: 'var(--muted-foreground)' }}>Mejora a Gold o Diamond para quitarlos.</span>
+                  </div>
+                ) : (
+                  <div className="rounded-lg px-3 py-2 text-xs flex items-center gap-2" style={{ background: 'color-mix(in srgb, var(--primary) 10%, transparent)', color: 'var(--foreground)' }}>
+                    <Check className="w-4 h-4" /> <span>Estás libre de anuncios.</span>
+                  </div>
+                )}
 
                 {/* Stats grid */}
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">

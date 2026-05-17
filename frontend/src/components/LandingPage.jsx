@@ -68,6 +68,7 @@ export default function LandingPage({ t, language, setLanguage, onAuth, onGoogle
               className="w-full border-themed hover:bg-[color:var(--secondary)] mb-4"
               onClick={onGoogleLogin}
               style={{ color: 'var(--foreground)' }}
+              data-testid="google-login-btn"
             >
               <svg className="w-5 h-5 mr-2" viewBox="0 0 24 24">
                 <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/>
@@ -92,6 +93,7 @@ export default function LandingPage({ t, language, setLanguage, onAuth, onGoogle
                     value={formData.name}
                     onChange={(e) => setFormData({ ...formData, name: e.target.value })}
                     className="input-themed mt-1.5"
+                    data-testid="auth-name-input"
                   />
                 </div>
               )}
@@ -104,6 +106,7 @@ export default function LandingPage({ t, language, setLanguage, onAuth, onGoogle
                   onChange={(e) => setFormData({ ...formData, email: e.target.value })}
                   required
                   className="input-themed mt-1.5"
+                  data-testid="auth-email-input"
                 />
               </div>
               <div>
@@ -115,22 +118,24 @@ export default function LandingPage({ t, language, setLanguage, onAuth, onGoogle
                   onChange={(e) => setFormData({ ...formData, password: e.target.value })}
                   required
                   className="input-themed mt-1.5"
+                  data-testid="auth-password-input"
                 />
               </div>
-              <Button type="submit" className="w-full gradient-primary font-semibold hover:opacity-90 transition-opacity">
+              <Button type="submit" className="w-full gradient-primary font-semibold hover:opacity-90 transition-opacity" data-testid="auth-submit-btn">
                 {isLogin ? t.landing.signIn : t.landing.createAccountBtn}
               </Button>
             </form>
 
             <p className="text-center text-sm mt-5" style={{ color: 'var(--muted-foreground)' }}>
-              {(isLogin ? t.landing.dontHaveAccount : t.landing.alreadyHaveAccount) + ' '}
+              <span>{(isLogin ? t.landing.dontHaveAccount : t.landing.alreadyHaveAccount) + ' '}</span>
               <button
                 type="button"
                 onClick={() => setIsLogin(!isLogin)}
                 className="font-medium hover:underline"
                 style={{ color: 'var(--primary)' }}
+                data-testid="toggle-auth-mode-btn"
               >
-                {isLogin ? t.landing.signUp : t.landing.signIn}
+                <span>{isLogin ? t.landing.signUp : t.landing.signIn}</span>
               </button>
             </p>
           </CardContent>

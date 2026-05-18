@@ -27,6 +27,12 @@ export default function ProfileView({ t, user, currentTheme, onUpdateProfile, on
     age: user?.age || '',
     pronouns: user?.pronouns || '',
     nsfw_enabled: !!user?.nsfw_enabled,
+    animated_bg: (() => {
+      try {
+        const v = localStorage.getItem('ethernal-animated-bg');
+        return v === null ? true : v === '1';
+      } catch (e) { return true; }
+    })(),
   });
   const [avatarPreview, setAvatarPreview] = useState(user?.avatar || null);
   const [saving, setSaving] = useState(false);
@@ -194,6 +200,33 @@ export default function ProfileView({ t, user, currentTheme, onUpdateProfile, on
                     {themeOptions.map(o => <SelectItem key={o.value} value={o.value} className="py-3 text-base">{o.label}</SelectItem>)}
                   </SelectContent>
                 </Select>
+              </div>
+
+              <div
+                className="flex items-center justify-between gap-4 p-3 rounded-lg"
+                style={{
+                  background: 'color-mix(in srgb, var(--secondary) 40%, transparent)',
+                  border: '1px solid color-mix(in srgb, var(--border) 60%, transparent)',
+                }}
+              >
+                <div className="min-w-0">
+                  <Label style={{ color: 'var(--foreground)' }} className="cursor-pointer">
+                    {t.profile.animatedBg || 'Fondo animado'}
+                  </Label>
+                  <p className="text-xs mt-1" style={{ color: 'var(--muted-foreground)' }}>
+                    {t.profile.animatedBgHint || 'Partículas y efectos en movimiento detrás de la interfaz. Desactívalo si notas la app lenta.'}
+                  </p>
+                </div>
+                <Switch
+                  checked={formData.animated_bg !== false}
+                  onCheckedChange={(v) => {
+                    setFormData({ ...formData, animated_bg: !!v });
+                    try {
+                      localStorage.setItem('ethernal-animated-bg', v ? '1' : '0');
+                      window.dispatchEvent(new CustomEvent('ethernal-animated-bg-changed', { detail: { enabled: !!v } }));
+                    } catch (e) { /* ignore */ }
+                  }}
+                />
               </div>
 
               <div>

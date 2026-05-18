@@ -71,7 +71,10 @@ code {
     color: var(--primary-foreground);
   }
   .gradient-dark {
-    background: var(--gradient-dark);
+    background:
+      linear-gradient(180deg,
+        color-mix(in srgb, var(--background) 78%, transparent) 0%,
+        color-mix(in srgb, var(--background) 92%, transparent) 100%);
     min-height: 100vh;
   }
   .text-gradient {
@@ -139,7 +142,7 @@ code {
   position: absolute;
   border-radius: 9999px;
   filter: blur(90px);
-  opacity: 0.22;
+  opacity: 0.45;
   will-change: transform;
 }
 .bg-orb-1 {

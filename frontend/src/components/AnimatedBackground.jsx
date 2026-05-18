@@ -45,6 +45,11 @@ export default function AnimatedBackground() {
     (typeof document !== 'undefined' && document.body?.getAttribute('data-theme')) || 'medievalWarm'
   );
   const [particles, setParticles] = useState(() => buildParticles(theme));
+  const [enabled, setEnabled] = useState(() => {
+    if (typeof localStorage === 'undefined') return true;
+    const v = localStorage.getItem('ethernal-animated-bg');
+    return v === null ? true : v === '1';
+  });
 
   useEffect(() => {
     if (typeof document === 'undefined' || !document.body) return undefined;
@@ -54,15 +59,27 @@ export default function AnimatedBackground() {
       setParticles(buildParticles(t));
     });
     obs.observe(document.body, { attributes: true, attributeFilter: ['data-theme'] });
-    // Initial sync in case body wasn't ready on first render
     const initial = document.body.getAttribute('data-theme') || 'medievalWarm';
     if (initial !== theme) {
       setTheme(initial);
       setParticles(buildParticles(initial));
     }
-    return () => obs.disconnect();
+
+    // Listen for the custom event fired when the user toggles the setting.
+    const onToggle = (e) => {
+      const next = e?.detail?.enabled ?? (localStorage.getItem('ethernal-animated-bg') !== '0');
+      setEnabled(!!next);
+    };
+    window.addEventListener('ethernal-animated-bg-changed', onToggle);
+
+    return () => {
+      obs.disconnect();
+      window.removeEventListener('ethernal-animated-bg-changed', onToggle);
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  if (!enabled) return null;
 
   return (
     <div className="animated-bg" aria-hidden="true">

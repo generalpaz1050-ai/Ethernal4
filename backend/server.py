@@ -103,6 +103,13 @@ async def mp_create_preference(*, user: Dict[str, Any], plan: str, return_url: s
         "notification_url": notification_url,
         "external_reference": f"{user['user_id']}:{plan}",
         "statement_descriptor": "ETHERNAL",
+        # Disable installments — only single-payment is allowed.
+        "payment_methods": {
+            "installments": 1,
+            "default_installments": 1,
+            "excluded_payment_types": [],
+            "excluded_payment_methods": [],
+        },
         "metadata": {
             "user_id": user["user_id"],
             "plan": plan,

@@ -71,7 +71,9 @@ export const enginesAPI = {
 export const subscriptionAPI = {
   plans: () => api.get('/subscription/plans'),
   stats: () => api.get('/me/stats'),
-  checkout: (plan) => api.post('/subscription/checkout', { plan }),
+  checkout: (plan, returnUrl) => api.post('/subscription/checkout', { plan, return_url: returnUrl }),
+  verify: ({ payment_id, preference_id } = {}) =>
+    api.get('/payments/mercadopago/verify', { params: { payment_id, preference_id } }),
 };
 
 export const tagsAPI = {

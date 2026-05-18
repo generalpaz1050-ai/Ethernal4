@@ -47,6 +47,148 @@ GROQ_BASE_URL = "https://api.groq.com/openai/v1"
 DEEPSEEK_API_KEY = os.environ.get('DEEPSEEK_API_KEY', '')
 DEEPSEEK_BASE_URL = os.environ.get('DEEPSEEK_BASE_URL', 'https://api.deepseek.com')
 
+# Mercado Pago (payments)
+MERCADOPAGO_ACCESS_TOKEN = os.environ.get('MERCADOPAGO_ACCESS_TOKEN', '')
+MERCADOPAGO_MODE = os.environ.get('MERCADOPAGO_MODE', 'test')  # 'test' | 'live'
+MERCADOPAGO_API = "https://api.mercadopago.com"
+PUBLIC_APP_URL = os.environ.get('PUBLIC_APP_URL', '').rstrip('/')
+
+
+# Plan → USD price mapping. Mercado Pago expects local currency; we let the
+# token's account define the currency_id ("ARS", "MXN", "BRL", etc.) and
+# we pass the price already converted. For test mode we use a small symbolic
+# price so the sandbox cards charge a clearly-test amount.
+PLAN_PRICE_USD = {
+    "gold": 4.99,
+    "diamond": 9.99,
+}
+
+
+async def mp_create_preference(*, user: Dict[str, Any], plan: str, return_url: str) -> Dict[str, Any]:
+    """Create a Mercado Pago Checkout Pro preference and return the response.
+
+    The preference defines the item to buy, where to redirect after payment,
+    and the webhook URL that will receive the payment notification.
+    """
+    if not MERCADOPAGO_ACCESS_TOKEN:
+        raise RuntimeError("MERCADOPAGO_ACCESS_TOKEN not configured")
+    if plan not in PLAN_PRICE_USD:
+        raise ValueError(f"Unsupported plan: {plan}")
+
+    backend_base = (PUBLIC_APP_URL or "").rstrip('/')
+    notification_url = f"{backend_base}/api/payments/mercadopago/webhook"
+    success_url = return_url
+    failure_url = return_url + ("&" if "?" in return_url else "?") + "mp_status=failure"
+    pending_url = return_url + ("&" if "?" in return_url else "?") + "mp_status=pending"
+
+    payload: Dict[str, Any] = {
+        "items": [{
+            "id": f"plan_{plan}",
+            "title": f"Ethernal {plan.capitalize()} (30 días)",
+            "description": f"Suscripción Ethernal {plan.capitalize()} por 30 días",
+            "quantity": 1,
+            "currency_id": "USD",  # account-default; MP may auto-translate
+            "unit_price": float(PLAN_PRICE_USD[plan]),
+        }],
+        "payer": {
+            "email": user.get("email") or "test_user@example.com",
+            "name": user.get("name") or "User",
+        },
+        "back_urls": {
+            "success": success_url,
+            "failure": failure_url,
+            "pending": pending_url,
+        },
+        "auto_return": "approved",
+        "notification_url": notification_url,
+        "external_reference": f"{user['user_id']}:{plan}",
+        "statement_descriptor": "ETHERNAL",
+        "metadata": {
+            "user_id": user["user_id"],
+            "plan": plan,
+        },
+    }
+
+    headers = {
+        "Authorization": f"Bearer {MERCADOPAGO_ACCESS_TOKEN}",
+        "Content-Type": "application/json",
+    }
+    async with httpx.AsyncClient(timeout=20.0) as hc:
+        r = await hc.post(f"{MERCADOPAGO_API}/checkout/preferences", headers=headers, json=payload)
+        if r.status_code >= 400:
+            try:
+                body = r.json()
+            except Exception:
+                body = {"raw": r.text[:500]}
+            raise RuntimeError(f"mp create preference {r.status_code}: {body}")
+        return r.json()
+
+
+async def mp_get_payment(payment_id: str) -> Dict[str, Any]:
+    """Fetch a single payment object from Mercado Pago."""
+    if not MERCADOPAGO_ACCESS_TOKEN:
+        raise RuntimeError("MERCADOPAGO_ACCESS_TOKEN not configured")
+    headers = {"Authorization": f"Bearer {MERCADOPAGO_ACCESS_TOKEN}"}
+    async with httpx.AsyncClient(timeout=15.0) as hc:
+        r = await hc.get(f"{MERCADOPAGO_API}/v1/payments/{payment_id}", headers=headers)
+        if r.status_code >= 400:
+            raise RuntimeError(f"mp get payment {payment_id} status {r.status_code}: {r.text[:300]}")
+        return r.json()
+
+
+async def mp_activate_plan_for_payment(payment: Dict[str, Any]) -> Dict[str, Any]:
+    """Given an approved MP payment, activate the corresponding plan on the user.
+    Returns a small dict describing what was done (for logging / response)."""
+    status = payment.get("status")
+    if status != "approved":
+        return {"activated": False, "reason": f"status={status}"}
+
+    ext_ref = payment.get("external_reference") or ""
+    user_id: Optional[str] = None
+    plan: Optional[str] = None
+    if ":" in ext_ref:
+        user_id, plan = ext_ref.split(":", 1)
+    else:
+        meta = payment.get("metadata") or {}
+        user_id = meta.get("user_id")
+        plan = meta.get("plan")
+
+    if not user_id or plan not in ("gold", "diamond"):
+        return {"activated": False, "reason": "missing user_id/plan in payment"}
+
+    # Idempotency: skip if this payment was already processed.
+    payment_id = str(payment.get("id"))
+    existing = await db.payments.find_one({"payment_id": payment_id}, {"_id": 0})
+    if existing and existing.get("activated"):
+        return {"activated": True, "duplicate": True, "user_id": user_id, "plan": plan}
+
+    end = datetime.now(timezone.utc) + timedelta(days=30)
+    sub = {"plan": plan, "status": "active", "currentPeriodEnd": end}
+    await db.users.update_one({"user_id": user_id}, {"$set": {"subscription": sub}})
+
+    try:
+        await grant_kyr_for_plan(user_id, plan)
+    except Exception as e:
+        logging.getLogger(__name__).warning("grant_kyr_for_plan failed: %s", e)
+
+    record = {
+        "payment_id": payment_id,
+        "user_id": user_id,
+        "plan": plan,
+        "amount": payment.get("transaction_amount"),
+        "currency": payment.get("currency_id"),
+        "status": status,
+        "provider": "mercadopago",
+        "external_reference": ext_ref,
+        "activated": True,
+        "created_at": datetime.now(timezone.utc),
+    }
+    await db.payments.update_one({"payment_id": payment_id}, {"$set": record}, upsert=True)
+    return {"activated": True, "user_id": user_id, "plan": plan}
+
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
 
 async def deepseek_chat(
     *,
@@ -1349,7 +1491,8 @@ async def my_stats(
 
 
 class CheckoutRequest(BaseModel):
-    plan: str   # "gold" | "diamond"
+    plan: str           # "gold" | "diamond"
+    return_url: Optional[str] = None  # frontend route to send the user back to
 
 
 @api_router.post("/subscription/checkout")
@@ -1358,14 +1501,22 @@ async def subscription_checkout(
     authorization: Optional[str] = Header(None),
     session_token: Optional[str] = Cookie(None),
 ):
-    """Placeholder for real payment integration (Stripe / PayPal).
-    Currently returns a 'coming soon' response. Owner can self-upgrade for testing.
+    """Create a Mercado Pago checkout for the chosen plan and return the URL.
+
+    Flow:
+      1. Frontend posts {plan, return_url} here.
+      2. Backend creates a MP preference, returns its checkout URL.
+      3. Frontend redirects user to that URL.
+      4. After paying, MP redirects user back to return_url (?mp_status=...).
+      5. In parallel MP hits /api/payments/mercadopago/webhook → we activate the plan.
+
+    Owners can self-grant the plan without paying (for testing the UI).
     """
     user = await require_user(authorization, session_token)
     if req.plan not in ("gold", "diamond"):
         raise HTTPException(400, "Invalid plan")
 
-    # Owner can self-grant for testing the UI flow
+    # Owner bypass: instant grant.
     if is_owner(user):
         end = datetime.now(timezone.utc) + timedelta(days=30)
         sub = {"plan": req.plan, "status": "active", "currentPeriodEnd": end}
@@ -1373,12 +1524,115 @@ async def subscription_checkout(
         granted = await grant_kyr_for_plan(user["user_id"], req.plan)
         return {"success": True, "owner_granted": True, "plan": req.plan, "kyr_granted": granted}
 
-    return {
-        "success": False,
-        "checkout_pending": True,
-        "message": "Los pagos con tarjeta estarán disponibles pronto. Contacta al administrador para activar tu plan.",
+    if not MERCADOPAGO_ACCESS_TOKEN:
+        raise HTTPException(503, "Payment provider not configured")
+
+    base_return = req.return_url or (PUBLIC_APP_URL + "/")
+    # Tag the return URL so the frontend can show a toast on come-back.
+    sep = "&" if "?" in base_return else "?"
+    return_url = f"{base_return}{sep}mp=1&plan={req.plan}"
+
+    try:
+        pref = await mp_create_preference(user=user, plan=req.plan, return_url=return_url)
+    except Exception as e:
+        logger.error("MP create preference failed: %s", e)
+        raise HTTPException(502, "Could not initiate payment. Try again later.")
+
+    # In TEST mode MP returns both init_point (real) and sandbox_init_point (test).
+    checkout_url = (
+        pref.get("sandbox_init_point") if MERCADOPAGO_MODE == "test" else pref.get("init_point")
+    ) or pref.get("init_point") or pref.get("sandbox_init_point")
+
+    if not checkout_url:
+        raise HTTPException(502, "MP returned no checkout URL")
+
+    # Persist a pending payment record so we can correlate webhooks later.
+    await db.payments.insert_one({
+        "preference_id": pref.get("id"),
+        "user_id": user["user_id"],
         "plan": req.plan,
+        "provider": "mercadopago",
+        "status": "pending",
+        "activated": False,
+        "created_at": datetime.now(timezone.utc),
+        "amount": PLAN_PRICE_USD[req.plan],
+    })
+
+    return {
+        "success": True,
+        "checkout_url": checkout_url,
+        "preference_id": pref.get("id"),
+        "plan": req.plan,
+        "mode": MERCADOPAGO_MODE,
     }
+
+
+# ─── Mercado Pago webhook ──────────────────────────────────────
+# MP calls this URL when a payment is created/updated. The query string
+# carries `topic` and `id`. We fetch the payment object and, if approved,
+# activate the corresponding plan on the user. We always respond 200 so MP
+# doesn't keep retrying — even if we can't process the body yet.
+
+@api_router.post("/payments/mercadopago/webhook")
+async def mp_webhook(request: Request):
+    try:
+        params = dict(request.query_params)
+        topic = params.get("topic") or params.get("type") or ""
+        notif_id = params.get("id") or params.get("data.id")
+
+        try:
+            body = await request.json()
+        except Exception:
+            body = {}
+
+        if not notif_id and isinstance(body, dict):
+            data = body.get("data") or {}
+            notif_id = data.get("id") or body.get("id")
+            topic = topic or body.get("type") or body.get("topic") or ""
+
+        if not notif_id:
+            return JSONResponse({"received": True, "skipped": "no id"}, status_code=200)
+
+        # We only handle payment-type notifications.
+        if topic and "payment" not in str(topic).lower():
+            return JSONResponse({"received": True, "skipped": f"topic={topic}"}, status_code=200)
+
+        payment = await mp_get_payment(str(notif_id))
+        result = await mp_activate_plan_for_payment(payment)
+        logger.info("MP webhook processed: payment=%s result=%s", notif_id, result)
+        return JSONResponse({"received": True, "result": result}, status_code=200)
+    except Exception as e:
+        logger.exception("MP webhook error: %s", e)
+        # Still 200 so MP doesn't hammer us; we'll fix manually if needed.
+        return JSONResponse({"received": True, "error": str(e)}, status_code=200)
+
+
+@api_router.get("/payments/mercadopago/verify")
+async def mp_verify(
+    payment_id: Optional[str] = None,
+    preference_id: Optional[str] = None,
+    authorization: Optional[str] = Header(None),
+    session_token: Optional[str] = Cookie(None),
+):
+    """Frontend can call this after MP redirects the user back, in case the
+    webhook hasn't landed yet — we re-check the payment and activate if needed.
+    """
+    user = await require_user(authorization, session_token)
+    if not payment_id:
+        return {"verified": False, "reason": "missing payment_id"}
+    try:
+        payment = await mp_get_payment(str(payment_id))
+        ext = payment.get("external_reference") or ""
+        # Make sure the payment really belongs to this user.
+        if ext and not ext.startswith(user["user_id"] + ":") and not is_owner(user):
+            raise HTTPException(403, "Payment doesn't belong to this user")
+        result = await mp_activate_plan_for_payment(payment)
+        return {"verified": True, "status": payment.get("status"), **result}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("mp_verify error: %s", e)
+        return {"verified": False, "reason": str(e)}
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━

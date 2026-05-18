@@ -46,20 +46,77 @@ export default function SubscriptionView({ t, user, onBack }) {
     })();
   }, []);
 
+  // After Mercado Pago redirects the user back, the URL contains:
+  //   ?mp=1&plan=gold&payment_id=...&status=approved&preference_id=...
+  // We use that to verify the payment server-side (in case the webhook
+  // hasn't landed yet) and refresh stats. The query string is cleared after.
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get('mp') !== '1') return;
+    const paymentId = params.get('payment_id') || params.get('collection_id');
+    const status = params.get('status') || params.get('collection_status') || params.get('mp_status');
+    const planLabel = params.get('plan') || 'plan';
+
+    // Clean the URL immediately so refreshes don't re-trigger.
+    const cleanUrl = window.location.origin + window.location.pathname;
+    window.history.replaceState({}, document.title, cleanUrl);
+
+    (async () => {
+      if (status === 'failure' || status === 'rejected') {
+        toast.error('Pago rechazado. Si crees que es un error vuelve a intentarlo.');
+        return;
+      }
+      if (status === 'pending' || status === 'in_process') {
+        toast('El pago está pendiente de aprobación. Te avisaremos cuando se confirme.');
+      }
+      if (paymentId) {
+        try {
+          const v = await subscriptionAPI.verify({ payment_id: paymentId });
+          if (v.data?.activated) {
+            toast.success(`¡Plan ${planLabel.toUpperCase()} activado!`);
+          } else if (status === 'approved') {
+            toast('Pago recibido. Activación en proceso...');
+          }
+        } catch (e) {
+          console.error('verify failed', e);
+        }
+        // Refresh stats either way
+        try {
+          const s = await subscriptionAPI.stats();
+          setStats(s.data);
+        } catch (e) { /* ignore */ }
+      }
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   const handleBuy = async (plan) => {
     setCheckoutPlan(plan);
     setBusy(true);
     try {
-      const res = await subscriptionAPI.checkout(plan.key);
+      // Tell the backend where MP should redirect the user after the checkout.
+      const returnUrl = window.location.origin + window.location.pathname;
+      const res = await subscriptionAPI.checkout(plan.key, returnUrl);
+
+      // 1) Owner self-grant (no payment needed) → refresh + toast.
       if (res.data?.success && res.data?.owner_granted) {
         toast.success(`Plan ${plan.label} activado (modo owner)`);
-        // Refresh stats
         const s = await subscriptionAPI.stats();
         setStats(s.data);
-      } else {
-        setCheckoutMessage(res.data?.message || 'Los pagos estarán disponibles pronto.');
-        setCheckoutOpen(true);
+        return;
       }
+
+      // 2) Real checkout → redirect the user to Mercado Pago.
+      if (res.data?.checkout_url) {
+        // Small UX touch: tell the user we're sending them out.
+        toast.success('Redirigiendo a Mercado Pago...');
+        window.location.href = res.data.checkout_url;
+        return;
+      }
+
+      // 3) Fallback: backend says payments aren't ready.
+      setCheckoutMessage(res.data?.message || 'No se pudo iniciar el pago.');
+      setCheckoutOpen(true);
     } catch (e) {
       setCheckoutMessage(e?.response?.data?.detail || 'No se pudo procesar la solicitud.');
       setCheckoutOpen(true);
